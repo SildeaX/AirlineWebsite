@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./style.css">
+    <title>RoosterManagement</title>
+</head>
+
+<body>
+    <!-- TOP BAR -->
+    <header>
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <span class="logo">RoosterManagement</span>
+            </div>
+        </div>
+
+        <!-- MAIN NAV -->
+        <nav class="main-nav">
+            <div class="main-nav-inner">
+                <div class="nav-left">
+                    <div class="nav-item">TICKET OPERATIONS</div> 
+                    <div class="nav-item">EXTRA SERVICES</div>
+                </div>
+                <div class="nav-right">
+                    <button class="nav-button">Help</button>
+                    <button class="nav-button primary">Login / Sign Up</button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <!-- HERO -->
+    <section class="hero">
+        <!-- LEFT: FLIGHT SEARCH -->
+        <div class="card">
+            <div class="card-title">Search Flight Ticket</div>
+            <div class="tab-header">
+                <label class="tab-button active" data-tab="flight">
+                    Flight Search
+                </label>
+            </div>
+
+            <div id="tab-flight" class="tab-content">
+                <div class="flight-type">
+                    <label>
+                        <input type="radio" name="tripType" value="oneway" checked>
+                        One Way
+                    </label>
+                    <label>
+                        <input type="radio" name="tripType" value="round">
+                        Round Trip
+                    </label>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>From</label>
+                        <input type="text" placeholder="City or Airport">
+                    </div>
+                    <div class="form-field">
+                        <label>To</label>
+                        <input type="text" placeholder="City or Airport">
+                    </div>
+                    <div class="form-field">
+                        <label>Departure Date</label>
+                        <input type="date">
+                    </div>
+                    <div class="form-field">
+                        <label>Return Date</label>
+                        <input type="date">
+                    </div>
+                    <div class="form-field">
+                        <label>Passenger</label>
+                        <div class="passenger-row">
+                            <span>Total: <strong id="passengerTotal">1</strong></span>
+                            <div class="counter">
+                                <button type="button" id="passengerMinus">-</button>
+                                <span id="passengerCount">1</span>
+                                <button type="button" id="passengerPlus">+</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-field">
+                        <label>Class</label>
+                        <select>
+                            <option>Economy</option>
+                            <option>Business</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="search-button">SEARCH FLIGHT</button>
+            </div>
+        </div>
+
+        <!-- RIGHT: CHECK-IN / MANAGE BOOKING -->
+        <div class="card">
+            <div class="card-title">Online Check-in / Manage Your Flight</div>
+            <div class="right-card-tabs">
+                <button class="active" data-checktab="checkin">Online Check-in</button>
+                <button data-checktab="manage">Manage Booking</button>
+            </div>
+
+            <div id="checkin-tab" class="right-card-form">
+                <label>
+                    Passenger Last Name
+                    <input type="text" placeholder="Last Name">
+                </label>
+                <label>
+                    Reservation Code (PNR)
+                    <input type="text" placeholder="6-character PNR">
+                </label>
+                <button class="secondary-button">CONTINUE</button>
+                <p class="small-note">
+                    Skip the queue at the airport and save time.
+                </p>
+            </div>
+
+            <div id="manage-tab" class="right-card-form" style="display:none;">
+                <label>
+                    Passenger Last Name
+                    <input type="text" placeholder="Last Name">
+                </label>
+                <label>
+                    Reservation Code / E-ticket
+                    <input type="text" placeholder="PNR or e-ticket number">
+                </label>
+                <button class="secondary-button">VIEW BOOKING</button>
+                <p class="small-note">
+                    Manage baggage, seat, meal and all other services here.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- EXTRA SERVICES -->
+    <section class="section">
+        <h2 class="section-title">Add Extra Services to Your Flight</h2>
+        <div class="chips">
+            <div class="chip"><span>Seat Selection</span></div>
+            <div class="chip"><span>Extra Baggage</span></div>
+            <div class="chip"><span>Meal Selection</span></div>
+            <div class="chip"><span>Free Cancellation</span></div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-inner">
+            <div>
+                Privacy · Cookie Policy · Contact
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // TAB SWITCHING (LEFT)
+        const tabButtons = document.querySelectorAll(".tab-button");
+        const tabContents = {
+            flight: document.getElementById("tab-flight"),
+            hotel: document.getElementById("tab-hotel"),
+            car: document.getElementById("tab-car"),
+        };
+
+        tabButtons.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                tabButtons.forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
+
+                const tab = btn.dataset.tab;
+                Object.keys(tabContents).forEach((key) => {
+                    tabContents[key].style.display = key === tab ? "block" : "none";
+                });
+            });
+        });
+
+        // PASSENGER COUNTER
+        let passengerCount = 1;
+        const passengerCountSpan = document.getElementById("passengerCount");
+        const passengerTotalSpan = document.getElementById("passengerTotal");
+        const minusBtn = document.getElementById("passengerMinus");
+        const plusBtn = document.getElementById("passengerPlus");
+
+        const updatePassengerDisplay = () => {
+            passengerCountSpan.textContent = passengerCount;
+            passengerTotalSpan.textContent = passengerCount;
+        };
+
+        minusBtn.addEventListener("click", () => {
+            passengerCount = Math.max(1, passengerCount - 1);
+            updatePassengerDisplay();
+        });
+
+        plusBtn.addEventListener("click", () => {
+            passengerCount += 1;
+            updatePassengerDisplay();
+        });
+
+        // RIGHT CARD TABS
+        const checkTabs = document.querySelectorAll("[data-checktab]");
+        const checkinTab = document.getElementById("checkin-tab");
+        const manageTab = document.getElementById("manage-tab");
+
+        checkTabs.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                checkTabs.forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
+
+                const which = btn.dataset.checktab;
+                if (which === "checkin") {
+                    checkinTab.style.display = "flex";
+                    manageTab.style.display = "none";
+                } else {
+                    checkinTab.style.display = "none";
+                    manageTab.style.display = "flex";
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
