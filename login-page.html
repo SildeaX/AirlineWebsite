@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RoosterManagement</title>
+  <link rel="stylesheet" href="./login-page.css" />
+</head>
+
+<body>
+  <!-- TOP BAR -->
+  <header>
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <span class="logo">RoosterManagement</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT (ORTALANMIŞ LOGIN / SIGN UP) -->
+  <main class="main">
+    <section class="hero">
+      <!-- SADECE AUTH CARD -->
+      <div class="card" id="auth-card">
+        <div class="card-title">Account</div>
+
+        <div class="auth-tabs">
+          <button class="auth-tab-button active" data-auth="login">Log In</button>
+          <button class="auth-tab-button" data-auth="signup">Sign Up</button>
+        </div>
+
+        <!-- LOGIN FORM -->
+        <form class="auth-form" id="login-form">
+          <div class="form-field">
+            <label>Email</label>
+            <input type="email" placeholder="you@example.com" required />
+          </div>
+          <div class="form-field">
+            <label>Password</label>
+            <input type="password" placeholder="Password" required />
+          </div>
+          <button type="submit" class="secondary-button full-width">
+            Log In
+          </button>
+          <p class="small-note">
+            Don't have an account?
+            <span class="link-text" id="go-signup">Sign up</span>
+          </p>
+        </form>
+
+        <!-- SIGN UP FORM -->
+        <form class="auth-form" id="signup-form" style="display: none;">
+          <div class="form-field">
+            <label>Full Name</label>
+            <input type="text" placeholder="Full Name" required />
+          </div>
+          <div class="form-field">
+            <label>Email</label>
+            <input type="email" placeholder="you@example.com" required />
+          </div>
+          <div class="form-field">
+            <label>Password</label>
+            <input type="password" placeholder="Password" required />
+          </div>
+          <div class="form-field">
+            <label>Confirm Password</label>
+            <input type="password" placeholder="Confirm Password" required />
+          </div>
+          <button type="submit" class="secondary-button full-width">
+            Sign Up
+          </button>
+          <p class="small-note">
+            Already have an account?
+            <span class="link-text" id="go-login">Log in</span>
+          </p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div>Privacy · Cookie Policy · Contact</div>
+    </div>
+  </footer>
+
+  <script>
+    // AUTH TABS (LOGIN / SIGNUP)
+    const authTabButtons = document.querySelectorAll(".auth-tab-button");
+    const loginForm = document.getElementById("login-form");
+    const signupForm = document.getElementById("signup-form");
+    const goSignup = document.getElementById("go-signup");
+    const goLogin = document.getElementById("go-login");
+
+    function switchAuthTab(which) {
+      authTabButtons.forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.auth === which);
+      });
+
+      if (which === "login") {
+        loginForm.style.display = "block";
+        signupForm.style.display = "none";
+      } else {
+        loginForm.style.display = "none";
+        signupForm.style.display = "block";
+      }
+    }
+
+    authTabButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        switchAuthTab(btn.dataset.auth);
+      });
+    });
+
+    goSignup.addEventListener("click", () => switchAuthTab("signup"));
+    goLogin.addEventListener("click", () => switchAuthTab("login"));
+
+    // NAVBAR'DAKİ BUTON AUTH CARD'A SCROLL ATSIN
+    const scrollToAuthBtn = document.getElementById("scrollToAuth");
+    const authCard = document.getElementById("auth-card");
+
+    scrollToAuthBtn.addEventListener("click", () => {
+      authCard.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  </script>
+</body>
+
+</html>
