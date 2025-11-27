@@ -13,7 +13,9 @@
     <header>
         <div class="top-bar">
             <div class="top-bar-left">
-                <span class="logo">RoosterManagement</span>
+                <a href="/">
+                    <span class="logo">RoosterManagement</span>
+                </a>
             </div>
         </div>
 
@@ -21,12 +23,14 @@
         <nav class="main-nav">
             <div class="main-nav-inner">
                 <div class="nav-left">
-                    <div class="nav-item">TICKET OPERATIONS</div> 
+                    <div class="nav-item">TICKET OPERATIONS</div>
                     <div class="nav-item">EXTRA SERVICES</div>
                 </div>
                 <div class="nav-right">
-                    <button class="nav-button">Help</button>
-                    <button class="nav-button primary">Login / Sign Up</button>
+                    <a href="/account" id="login-link">
+                        <button type="submit" class="nav-button primary" id="login-btn">Login / Sign Up</button>
+                    </a>
+                    <button type="submit" class="nav-button primary" id="logout-btn" style="display: none;">Logout</button>
                 </div>
             </div>
         </nav>
@@ -141,6 +145,36 @@
     </footer>
 
     <script>
+        // CHECK LOGIN STATUS ON PAGE LOAD
+        function checkLoginStatus() {
+            const token = localStorage.getItem("token");
+            const loginLink = document.getElementById("login-link");
+            const loginBtn = document.getElementById("login-btn");
+            const logoutBtn = document.getElementById("logout-btn");
+
+            if (token) {
+                // User is logged in
+                loginLink.style.display = "none";
+                loginBtn.style.display = "none";
+                logoutBtn.style.display = "block";
+            } else {
+                // User is not logged in
+                loginLink.style.display = "block";
+                loginBtn.style.display = "block";
+                logoutBtn.style.display = "none";
+            }
+        }
+
+        // Check on page load
+        checkLoginStatus();
+
+        // Logout button handler
+        document.getElementById("logout-btn").addEventListener("click", () => {
+            localStorage.removeItem("token");
+            checkLoginStatus();
+            alert("You have been logged out.");
+        });
+
         // TAB SWITCHING (LEFT)
         const tabButtons = document.querySelectorAll(".tab-button");
         const tabContents = {

@@ -4,6 +4,14 @@
     padding: 0;
 }
 
+a,
+a:hover,
+a:visited,
+a:active {
+    text-decoration: none;
+    color: inherit;
+}
+
 body {
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
         Roboto, sans-serif;
@@ -27,7 +35,19 @@ header {
     padding: 10px 16px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     height: 65px;
+}
+
+.top-bar-left {
+    display: flex;
+    align-items: center;
+}
+
+.top-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .logo {
