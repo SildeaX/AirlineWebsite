@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="mb-3">Roster for flight {{ flight['flight_no'] }}</h2>
+<p class="text-muted">
+  {{ flight['source'] }} → {{ flight['destination'] }} |
+  {{ flight['date_time'] }} |
+  Vehicle: {{ flight['vehicle_type'] }}
+</p>
+
+<a class="btn btn-outline-secondary mb-4"
+   href="{{ url_for('export_roster', flight_no=flight['flight_no']) }}">
+  Download JSON
+</a>
+
+<style>
+  /* --- plane view style --- */
+  .seat-legend span {
+    display: inline-block;
+    padding: 4px 8px;
+    margin-right: 8px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+  .legend-empty { background: #e0e0e0; }
+  .legend-eco   { background: #b3e5fc; }
+  .legend-biz   { background: #ffcdd2; }
+
+  .seat-grid {
+    border: 1px solid #ccc;
+    padding: 12px;
+    border-radius: 8px;
+    background: #fafafa;
+  }
+
+  .seat-row-label {
+    width: 40px;
+    text-align: center;
+    font-weight: 600;
+  }
+
+  .seat-box {
+    width: 28px;
+    height: 28px;
+    line-height: 26px;
+    text-align: center;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    margin: 2px;
+    display: inline-block;
+    border: 1px solid #bbb;
+  }
+  .seat-empty { background: #e0e0e0; }
+  .seat-eco   { background: #b3e5fc; }
+  .seat-biz   { background: #ffcdd2; }
+  .seat-occupied {
+    font-weight: 700;
+    border-width: 2px;
+  }
+
+  .aisle {
+    width: 16px;
+    display: inline-block;
+  }
+
+  .crew-panel {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px;
+    background: #f8f9fa;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+
+  .crew-panel h5 {
+    font-size: 1rem;
+    margin-top: 8px;
+    margin-bottom: 4px;
+  }
+
+  .crew-panel ul {
+    list-style: none;
+    padding-left: 0;
+    margin-bottom: 8px;
+  }
+
+  .crew-panel li {
+    font-size: 0.9rem;
+    padding: 2px 0;
+    border-bottom: 1px dotted #ccc;
+  }
+
+  .crew-role {
+    font-weight: 600;
+    margin-right: 4px;
+  }
+
+  .table-fixed-header thead th {
+    position: sticky;
+    top: 0;
+    background: #f1f1f1;
+  }
+</style>
+
+<div class="row">
+  <!-- LEFT: PILOTS + CABIN CREW (like your 3rd screenshot) -->
+  <div class="col-md-3 mb-4">
+    <div class="crew-panel">
+      <h5>Pilots</h5>
+      <ul>
+        {% for p in pilots %}
+          <li>
+            <span class="crew-role">{{ p['seniority']|capitalize }}</span>
+            {{ p['name'] }}
+          </li>
+        {% endfor %}
+      </ul>
+
+      <h5>Cabin Crew</h5>
+      <ul>
+        {% for c in cabin %}
+          <li>
+            <span class="crew-role">{{ c['attendant_type']|capitalize }}</span>
+            {{ c['name'] }}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- RIGHT: TABULAR + PLANE VIEW -->
+  <div class="col-md-9 mb-4">
+
+    <!-- =============== TABULAR VIEW =============== -->
+    <h3>Tabular View</h3>
+    <div class="table-responsive">
+      <table class="table table-bordered table-sm table-fixed-header">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Name</th>
+            <th>Role / Seat type</th>
+            <th>Seat No</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in pilots %}
+            <tr>
+              <td>Pilot</td>
+              <td>{{ p['name'] }}</td>
+              <td>{{ p['seniority'] }}</td>
+              <td>-</td>
+            </tr>
+          {% endfor %}
+          {% for c in cabin %}
+            <tr>
+              <td>Cabin crew</td>
+              <td>{{ c['name'] }}</td>
+              <td>{{ c['attendant_type'] }}</td>
+              <td>-</td>
+            </tr>
+          {% endfor %}
+          {% for pa in passengers %}
+            <tr>
+              <td>Passenger</td>
+              <td>{{ pa['name'] }}</td>
+              <td>{{ pa['seat_type'] }}</td>
+              <td>{{ pa['seat_no'] or '-' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <hr>
+
+    <!-- =============== PLANE VIEW (seat map) =============== -->
+    <h3>Plane View</h3>
+    <p class="text-muted">
+      Business rows are at the front. Each square is a seat (A–F). B = Business, E = Economy.
+    </p>
+
+    <div class="mb-2 seat-legend">
+      <span class="legend-empty">Empty seat</span>
+      <span class="legend-eco">Occupied Economy</span>
+      <span class="legend-biz">Occupied Business</span>
+    </div>
+
+    <div class="seat-grid">
+      <!-- header A–F -->
+      <div class="d-flex mb-2">
+        <div class="seat-row-label"></div>
+        <div class="flex-grow-1 text-center">
+          <span class="seat-box seat-empty">A</span>
+          <span class="seat-box seat-empty">B</span>
+          <span class="seat-box seat-empty">C</span>
+          <span class="aisle"></span>
+          <span class="seat-box seat-empty">D</span>
+          <span class="seat-box seat-empty">E</span>
+          <span class="seat-box seat-empty">F</span>
+        </div>
+      </div>
+
+      {% for row_num, seats in seat_rows.items() %}
+        {# split seats into left (A–C) and right (D–F) #}
+        {% set left = [] %}
+        {% set right = [] %}
+        {% for s in seats %}
+          {% if s['seat_no'][-1] in ['A', 'B', 'C'] %}
+            {% set _ = left.append(s) %}
+          {% else %}
+            {% set _ = right.append(s) %}
+          {% endif %}
+        {% endfor %}
+
+        <div class="d-flex align-items-center mb-1">
+          <div class="seat-row-label">{{ row_num }}</div>
+          <div class="flex-grow-1">
+
+            {# left side A–C #}
+            {% for s in left %}
+              {% set occ = s['occupant'] %}
+              {% set type_class = 'seat-empty' %}
+              {% if occ %}
+                {% if s['seat_type'] == 'business' %}
+                  {% set type_class = 'seat-biz seat-occupied' %}
+                {% else %}
+                  {% set type_class = 'seat-eco seat-occupied' %}
+                {% endif %}
+              {% endif %}
+              <span class="seat-box {{ type_class }}"
+                    title="{% if occ %}{{ occ['name'] }} ({{ occ['seat_type'] }}){% else %}Empty{% endif %}">
+                {% if occ %}
+                  {{ 'B' if occ['seat_type'] == 'business' else 'E' }}
+                {% else %}
+                  &nbsp;
+                {% endif %}
+              </span>
+            {% endfor %}
+
+            {# pad if fewer than 3 seats (should not happen but safe) #}
+            {% for i in range(3 - left|length) %}
+              <span class="seat-box seat-empty"></span>
+            {% endfor %}
+
+            <span class="aisle"></span>
+
+            {# right side D–F #}
+            {% for s in right %}
+              {% set occ = s['occupant'] %}
+              {% set type_class = 'seat-empty' %}
+              {% if occ %}
+                {% if s['seat_type'] == 'business' %}
+                  {% set type_class = 'seat-biz seat-occupied' %}
+                {% else %}
+                  {% set type_class = 'seat-eco seat-occupied' %}
+                {% endif %}
+              {% endif %}
+              <span class="seat-box {{ type_class }}"
+                    title="{% if occ %}{{ occ['name'] }} ({{ occ['seat_type'] }}){% else %}Empty{% endif %}">
+                {% if occ %}
+                  {{ 'B' if occ['seat_type'] == 'business' else 'E' }}
+                {% else %}
+                  &nbsp;
+                {% endif %}
+              </span>
+            {% endfor %}
+
+            {% for i in range(3 - right|length) %}
+              <span class="seat-box seat-empty"></span>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+  </div> <!-- /col-md-9 -->
+</div> <!-- /row -->
+
+<hr>
+
+<!-- =============== EXTENDED VIEW =============== -->
+<h3 class="mt-4">Extended View</h3>
+
+<h4>Pilots</h4>
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Seniority</th>
+      <th>Languages</th>
+      <th>Nationality</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in pilots %}
+      <tr>
+        <td>{{ p['name'] }}</td>
+        <td>{{ p['seniority'] }}</td>
+        <td>{{ p['languages'] }}</td>
+        <td>{{ p['nationality'] }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h4>Cabin Crew</h4>
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Languages</th>
+      <th>Nationality</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in cabin %}
+      <tr>
+        <td>{{ c['name'] }}</td>
+        <td>{{ c['attendant_type'] }}</td>
+        <td>{{ c['languages'] }}</td>
+        <td>{{ c['nationality'] }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h4>Passengers</h4>
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Age</th>
+      <th>Seat type</th>
+      <th>Seat no</th>
+      <th>Nationality</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for pa in passengers %}
+      <tr>
+        <td>{{ pa['name'] }}</td>
+        <td>{{ pa['age'] }}</td>
+        <td>{{ pa['seat_type'] }}</td>
+        <td>{{ pa['seat_no'] or '-' }}</td>
+        <td>{{ pa['nationality'] }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

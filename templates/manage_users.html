@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Manage Users</h2>
+<p class="text-muted">Change user roles (admin / operator / viewer).</p>
+
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>Email</th>
+      <th>Role</th>
+      <th>Change</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+      <tr>
+        <td>{{ u['email'] }}</td>
+        <td>{{ u['role'] }}</td>
+        <td>
+          <form method="post" class="d-flex">
+            <input type="hidden" name="user_id" value="{{ u['id'] }}">
+            <select name="role" class="form-select form-select-sm me-2">
+              <option value="viewer"   {% if u['role']=='viewer' %}selected{% endif %}>viewer</option>
+              <option value="operator" {% if u['role']=='operator' %}selected{% endif %}>operator</option>
+              <option value="admin"    {% if u['role']=='admin' %}selected{% endif %}>admin</option>
+            </select>
+            <button class="btn btn-sm btn-primary">Save</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

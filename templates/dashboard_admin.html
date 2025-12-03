@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Admin Dashboard</h2>
+<p class="text-muted">Manage users, monitor logs, and check API health.</p>
+
+<div class="row mb-4">
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Users</h5>
+        <p class="card-text">{{ user_count }} total users.</p>
+        <a href="{{ url_for('manage_users') }}" class="btn btn-sm btn-primary">Manage users</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Rosters</h5>
+        <p class="card-text">{{ roster_count }} saved rosters (SQL).</p>
+        <a href="{{ url_for('view_logs') }}" class="btn btn-sm btn-secondary">View logs</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h4>Recent flights</h4>
+{% include "flight_results.html" with context %}
+{% endblock %}
