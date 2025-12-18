@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Flight Operator Dashboard</h2>
+<p class="text-muted">Generate, edit, and export rosters.</p>
+
+<a class="btn btn-primary mb-3" href="{{ url_for('flight_search') }}">Search flights</a>
+
+<h4>Upcoming flights</h4>
+{% include "flight_results.html" with context %}
+{% endblock %}
