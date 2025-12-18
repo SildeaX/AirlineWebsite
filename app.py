@@ -1,7 +1,7 @@
 import sqlite3
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from flask import (
@@ -31,6 +31,10 @@ def close_db(error):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def init_db():
@@ -144,6 +148,10 @@ def seed_data(db):
          "Istanbul (IST)", "London (LHR)", "B737", None, None),
         ("IT3456", "2025-12-12 20:15", 60, 400,
          "Ankara (ESB)", "Istanbul (IST)", "A321", "XY7890", "PartnerAir"),
+
+        # ✅ NEW BIG PLANE FLIGHT (A330)
+        ("IT7777", "2025-12-13 10:00", 240, 3200,
+         "Istanbul (IST)", "Dubai (DXB)", "A330", None, None),
     ]
     db.executemany("""
         INSERT INTO flights (
@@ -157,8 +165,19 @@ def seed_data(db):
         ("John Senior", "Turkish", "TR,EN", "A320", 2000, "senior"),
         ("Jane Junior", "German", "DE,EN", "A320", 1500, "junior"),
         ("Alex Trainee", "Turkish", "TR,EN", "A320", 1000, "trainee"),
+
         ("Sam Senior", "British", "EN", "B737", 3000, "senior"),
         ("Lena Junior", "Turkish", "TR,EN", "B737", 2000, "junior"),
+        ("Trainee B", "Turkish", "TR,EN", "B737", 1500, "trainee"),
+
+        # ✅ A321 pilots
+        ("Captain A321", "Turkish", "TR,EN", "A321", 2500, "senior"),
+        ("FO A321", "German", "DE,EN", "A321", 2200, "junior"),
+
+        # ✅ A330 pilots (big plane: must include at least 1 senior)
+        ("Captain A330", "Turkish", "TR,EN", "A330", 9000, "senior"),
+        ("FO A330", "German", "DE,EN", "A330", 8000, "junior"),
+        ("Trainee A330", "Turkish", "TR,EN", "A330", 5000, "trainee"),
     ]
     db.executemany("""
         INSERT INTO pilots
@@ -171,6 +190,14 @@ def seed_data(db):
         ("Mehmet Regular", "Turkish", "TR,EN", "regular", "A320"),
         ("Hans Regular", "German", "DE,EN", "regular", "A320,A321"),
         ("Julia Chef", "British", "EN", "chef", "B737,A321"),
+
+        # ✅ A330 attendants
+        ("Lead A330", "Turkish", "TR,EN", "chief", "A330"),
+        ("Crew A330-1", "Turkish", "TR,EN", "regular", "A330"),
+        ("Crew A330-2", "German", "DE,EN", "regular", "A330"),
+        ("Crew A330-3", "Turkish", "TR,EN", "regular", "A330"),
+        ("Chef A330", "British", "EN", "chef", "A330"),
+        ("Crew A330-4", "German", "DE,EN", "regular", "A330"),
     ]
     db.executemany("""
         INSERT INTO attendants
@@ -179,12 +206,20 @@ def seed_data(db):
     """, attendants)
 
     passengers = [
+        # IT1234
         ("IT1234", "Ali Passenger", 30, "Turkish", "economy", None, 1, None),
         ("IT1234", "Veli Passenger", 28, "Turkish", "economy", None, 1, None),
-        ("IT1234", "Ayse Passenger", 2, "Turkish", "economy", None, None, 1),
+        ("IT1234", "Ayse Infant", 2, "Turkish", "economy", None, None, 1),  # infant linked to parent (id=1 after insert)
         ("IT1234", "John Business", 40, "British", "business", "1A", None, None),
+
+        # IT2345
         ("IT2345", "Passenger One", 25, "Turkish", "economy", None, None, None),
         ("IT2345", "Passenger Two", 27, "German", "economy", None, None, None),
+
+        # IT7777 (A330)
+        ("IT7777", "A330 Pax 1", 33, "Turkish", "economy", None, None, None),
+        ("IT7777", "A330 Pax 2", 29, "German", "economy", None, None, None),
+        ("IT7777", "A330 Biz 1", 45, "British", "business", None, None, None),
     ]
     db.executemany("""
         INSERT INTO passengers
@@ -203,11 +238,8 @@ def seed_data(db):
 
 
 def prune_old_logs(db):
-    cutoff = datetime.utcnow() - timedelta(days=180)
-    db.execute(
-        "DELETE FROM logs WHERE timestamp < ?",
-        (cutoff.isoformat(),)
-    )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=180)
+    db.execute("DELETE FROM logs WHERE timestamp < ?", (cutoff.isoformat(),))
     db.commit()
 
 
@@ -218,7 +250,7 @@ def log_action(level, action, details=""):
     db.execute("""
         INSERT INTO logs (timestamp, user_email, level, action, details)
         VALUES (?,?,?,?,?)
-    """, (datetime.utcnow().isoformat(), email, level, action, details))
+    """, (utc_now_iso(), email, level, action, details))
     db.commit()
 
 
@@ -334,7 +366,6 @@ def dashboard():
     flights = cur.fetchall()
 
     if user["role"] == "admin":
-        # quick stats for admin
         user_count = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
         roster_count = db.execute("SELECT COUNT(*) AS c FROM rosters").fetchone()["c"]
         return render_template(
@@ -357,6 +388,13 @@ def manage_users():
     if request.method == "POST":
         user_id = request.form["user_id"]
         new_role = request.form["role"]
+
+        # ✅ admin cannot change an admin's role
+        target = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        if target and target["role"] == "admin":
+            flash("Admin role cannot be changed.", "danger")
+            return redirect(url_for("manage_users"))
+
         db.execute("UPDATE users SET role = ? WHERE id = ?", (new_role, user_id))
         db.commit()
         log_action("INFO", "ChangeRole", f"user_id={user_id} -> {new_role}")
@@ -422,30 +460,59 @@ def flight_search():
 
 # ---------- SEAT MAP & ROSTER GENERATION ----------
 
+# ✅ different plane types & capacities
+PLANE_LAYOUTS = {
+    "A320": {"rows": 20, "biz": 3, "cols": "ABCDEF"},
+    "B737": {"rows": 22, "biz": 4, "cols": "ABCDEF"},
+    "A321": {"rows": 24, "biz": 5, "cols": "ABCDEF"},
+    "A330": {"rows": 30, "biz": 6, "cols": "ABCDEFGH"},  # NEW
+}
+
+# ✅ experience requirement: "bigger plane needs experience"
+SENIORITY_RANK = {"trainee": 0, "junior": 1, "senior": 2}
+
+# minimum rank allowed to be assigned on a plane
+PLANE_MIN_RANK = {
+    "A320": 0,  # trainees allowed (but constrained)
+    "B737": 0,
+    "A321": 0,
+    "A330": 1,  # junior+ allowed; and we will require at least one senior below
+}
+
+# ✅ cabin crew ranges
+CABIN_CREW_RANGE = {
+    "A320": (3, 5),
+    "B737": (4, 6),
+    "A321": (4, 7),
+    "A330": (6, 10),
+}
+
+
 def build_seat_map(vehicle_type):
-    cfg = {
-        "A320": (20, 3),
-        "B737": (22, 4),
-        "A321": (24, 5),
-    }
-    rows, business_rows = cfg.get(vehicle_type, (20, 3))
+    c = PLANE_LAYOUTS.get(vehicle_type)
+    if not c:
+        raise ValueError("Unknown aircraft type")
+
     seats = []
-    for r in range(1, rows + 1):
-        for col in "ABCDEF":
+    for r in range(1, c["rows"] + 1):
+        for col in c["cols"]:
             seat_no = f"{r}{col}"
-            seat_type = "business" if r <= business_rows else "economy"
+            seat_type = "business" if r <= c["biz"] else "economy"
             seats.append({"seat_no": seat_no, "seat_type": seat_type})
     return seats
 
 
-# ✅ UPDATED: group-aware auto assignment + infant rule
+def is_infant(p):
+    return p.get("age") is not None and int(p["age"]) <= 2
+
+
+# ✅ group-aware auto assignment + infant rule (kept from your file)
 def assign_seats(vehicle_type, passengers):
     seat_map = build_seat_map(vehicle_type)
 
     seat_type_by_no = {s["seat_no"]: s["seat_type"] for s in seat_map}
     all_seats = set(seat_type_by_no.keys())
 
-    # normalize + already-used seats
     used = set()
     for p in passengers:
         sn = p.get("seat_no")
@@ -454,10 +521,6 @@ def assign_seats(vehicle_type, passengers):
             p["seat_no"] = sn
             used.add(sn)
 
-    def is_infant(p):
-        return p.get("age") is not None and int(p["age"]) <= 2
-
-    # build free seats by row and side (A/B/C) (D/E/F)
     rows = defaultdict(lambda: {"left": [], "right": []})
     for s in seat_map:
         sn = s["seat_no"]
@@ -498,7 +561,6 @@ def assign_seats(vehicle_type, passengers):
 
         return None
 
-    # 1) groups first (sit together if possible)
     groups = defaultdict(list)
     for p in passengers:
         if p.get("seat_no"):
@@ -528,7 +590,6 @@ def assign_seats(vehicle_type, passengers):
                 p["seat_no"] = sn
                 used.add(sn)
 
-    # 2) remaining passengers individually
     free_business = [s["seat_no"] for s in seat_map if s["seat_type"] == "business" and s["seat_no"] not in used]
     free_economy = [s["seat_no"] for s in seat_map if s["seat_type"] == "economy" and s["seat_no"] not in used]
 
@@ -536,6 +597,7 @@ def assign_seats(vehicle_type, passengers):
         if p.get("seat_no"):
             continue
         if is_infant(p):
+            p["seat_no"] = None
             continue
 
         st = (p.get("seat_type") or "economy")
@@ -565,7 +627,6 @@ def build_seat_rows(vehicle_type, passengers):
     }
 
 
-# ✅ UPDATED: roster_id goes to template
 def render_roster_page(flight, roster, roster_id=None):
     pilots = roster.get("pilots", [])
     cabin = roster.get("cabin", [])
@@ -693,34 +754,71 @@ def generate_roster(flight_no):
         return render_template("error.html", user=current_user(),
                                message="Flight not found")
 
-    # pilots
-    all_pilots = db.execute("""
-        SELECT * FROM pilots
-        WHERE vehicle_type = ? AND max_distance_km >= ?
-    """, (flight["vehicle_type"], flight["distance_km"])).fetchall()
-
-    seniors = [p for p in all_pilots if p["seniority"] == "senior"]
-    juniors = [p for p in all_pilots if p["seniority"] == "junior"]
-    trainees = [p for p in all_pilots if p["seniority"] == "trainee"]
-
-    crew_pilots = []
-    if seniors:
-        crew_pilots.append(dict(seniors[0]))
-    if juniors:
-        crew_pilots.append(dict(juniors[0]))
-    if trainees:
-        crew_pilots.append(dict(trainees[0]))  # şimdilik 1 trainee
-
-    # cabin
-    att_all = db.execute("SELECT * FROM attendants").fetchall()
-    cabin = [dict(a) for a in att_all if flight["vehicle_type"] in (a["vehicle_types"] or "")]
-    cabin = cabin[:6]
+    # ✅ shared flight linking must be valid
+    if flight["shared_flight_no"] and not flight["shared_company"]:
+        flash("Shared flight must have a partner company.", "danger")
+        return redirect(url_for("flight_search"))
 
     # passengers
     pass_rows = db.execute("""
         SELECT * FROM passengers WHERE flight_no = ?
     """, (flight_no,)).fetchall()
     passengers = [dict(p) for p in pass_rows]
+
+    # ✅ infants unseated but linked to parent
+    for p in passengers:
+        if is_infant(p) and not p.get("parent_id"):
+            flash("Infant must be linked to a parent (parent_id).", "danger")
+            return redirect(url_for("flight_search"))
+
+    # ✅ capacity per vehicle (count only non-infants)
+    seat_capacity = len(build_seat_map(flight["vehicle_type"]))
+    non_infants = [p for p in passengers if not is_infant(p)]
+    if len(non_infants) > seat_capacity:
+        flash("Aircraft capacity exceeded.", "danger")
+        return redirect(url_for("flight_search"))
+
+    # pilots
+    all_pilots = db.execute("""
+        SELECT * FROM pilots
+        WHERE vehicle_type = ? AND max_distance_km >= ?
+    """, (flight["vehicle_type"], flight["distance_km"])).fetchall()
+
+    # ✅ experience requirement by plane size
+    eligible = [
+        p for p in all_pilots
+        if SENIORITY_RANK.get(p["seniority"], 0) >= PLANE_MIN_RANK.get(flight["vehicle_type"], 0)
+    ]
+
+    seniors = [p for p in eligible if p["seniority"] == "senior"]
+    juniors = [p for p in eligible if p["seniority"] == "junior"]
+    trainees = [p for p in eligible if p["seniority"] == "trainee"]
+
+    # ✅ pilot constraints: ≥1 senior + ≥1 junior; ≤2 trainees
+    if not seniors or not juniors:
+        flash("Pilot constraint failed: Need at least one senior and one junior pilot.", "danger")
+        return redirect(url_for("flight_search"))
+
+    # ✅ A330 extra experience: must include a senior
+    if flight["vehicle_type"] == "A330" and not seniors:
+        flash("A330 requires at least one senior pilot.", "danger")
+        return redirect(url_for("flight_search"))
+
+    crew_pilots = [dict(seniors[0]), dict(juniors[0])]
+    crew_pilots.extend(dict(t) for t in trainees[:2])  # ≤2 trainees
+
+    # cabin crew
+    att_all = db.execute("SELECT * FROM attendants").fetchall()
+    cabin_pool = [dict(a) for a in att_all if flight["vehicle_type"] in (a["vehicle_types"] or "")]
+
+    min_c, max_c = CABIN_CREW_RANGE.get(flight["vehicle_type"], (3, 6))
+    if len(cabin_pool) < min_c:
+        flash(f"Cabin crew constraint failed: Need at least {min_c} attendants.", "danger")
+        return redirect(url_for("flight_search"))
+
+    cabin = cabin_pool[:min_c]  # take minimum required
+
+    # assign seats (infants will get None)
     passengers = assign_seats(flight["vehicle_type"], passengers)
 
     roster = {
@@ -734,7 +832,7 @@ def generate_roster(flight_no):
     cur = db.execute("""
         INSERT INTO rosters (flight_no, created_at, data_json)
         VALUES (?, ?, ?)
-    """, (flight_no, datetime.utcnow().isoformat(), json.dumps(roster)))
+    """, (flight_no, utc_now_iso(), json.dumps(roster)))
     db.commit()
 
     new_roster_id = cur.lastrowid
@@ -767,14 +865,12 @@ def update_seat(flight_no):
     if not flight:
         return render_template("error.html", user=current_user(), message="Flight not found")
 
-    # seat must exist in this aircraft layout
     seat_map = build_seat_map(flight["vehicle_type"])
     seat_type_by_no = {s["seat_no"]: s["seat_type"] for s in seat_map}
     if new_seat not in seat_type_by_no:
         flash("Invalid seat number for this aircraft.", "danger")
         return redirect(url_for("view_latest_roster", flight_no=flight_no))
 
-    # load roster (specific roster_id or latest)
     if roster_id:
         row = db.execute(
             "SELECT id, data_json FROM rosters WHERE id = ? AND flight_no = ?",
@@ -795,7 +891,6 @@ def update_seat(flight_no):
     roster = json.loads(row["data_json"])
     passengers = roster.get("passengers", [])
 
-    # find passenger in roster json
     target = None
     for p in passengers:
         if int(p.get("id", -1)) == passenger_id:
@@ -806,18 +901,15 @@ def update_seat(flight_no):
         flash("Passenger not found in this roster.", "danger")
         return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
 
-    # infant rule
     if target.get("age") is not None and int(target["age"]) <= 2:
         flash("Infants (0-2) cannot be assigned a seat.", "danger")
         return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
 
-    # seat class match (business/economy)
     passenger_class = (target.get("seat_type") or "economy")
     if seat_type_by_no[new_seat] != passenger_class:
         flash(f"Seat class mismatch. Passenger is {passenger_class}.", "danger")
         return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
 
-    # occupancy check inside this roster
     for p in passengers:
         if p.get("seat_no") and str(p["seat_no"]).upper() == new_seat and int(p.get("id", -1)) != passenger_id:
             flash("Seat is already occupied.", "danger")
@@ -826,14 +918,12 @@ def update_seat(flight_no):
     old_seat = target.get("seat_no")
     target["seat_no"] = new_seat
 
-    # write roster json back
     db.execute(
         "UPDATE rosters SET data_json = ? WHERE id = ?",
         (json.dumps(roster), row["id"])
     )
     db.commit()
 
-    # optional consistency: also update passengers table
     db.execute(
         "UPDATE passengers SET seat_no = ? WHERE id = ? AND flight_no = ?",
         (new_seat, passenger_id, flight_no),
@@ -962,11 +1052,8 @@ def internal_error(e):
 # ---------- MAIN ----------
 
 if __name__ == "__main__":
-    if not os.path.exists(DATABASE):
-        with app.app_context():
-            init_db()
-    else:
-        with app.app_context():
-            init_db()
+    with app.app_context():
+        init_db()
 
+    # macOS AirPlay uses 5000, so we run on 5001
     app.run(debug=True, host="0.0.0.0", port=5001)

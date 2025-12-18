@@ -1,33 +1,22 @@
-{% if flights %}
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Flight No</th>
-          <th>Date &amp; Time</th>
-          <th>Route</th>
-          <th>Vehicle</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for f in flights %}
-        <tr>
-          <td>{{ f['flight_no'] }}</td>
-          <td>{{ f['date_time'] }}</td>
-          <td>{{ f['source'] }} → {{ f['destination'] }}</td>
-          <td>{{ f['vehicle_type'] }}</td>
-          <td>
-            <a class="btn btn-sm btn-primary"
-               href="{{ url_for('flight_roster', flight_no=f['flight_no']) }}">
-              Generate roster
-            </a>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-{% else %}
-  <div class="alert alert-info">No flights to display.</div>
-{% endif %}
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Flights</h2>
+
+<table class="table">
+<tr><th>No</th><th>Route</th><th></th></tr>
+{% for f in flights %}
+<tr>
+  <td>{{ f.flight_no }}</td>
+  <td>{{ f.source }} → {{ f.destination }}</td>
+  <td>
+    <a class="btn btn-primary btn-sm"
+       href="{{ url_for('list_saved_rosters', flight_no=f.flight_no) }}">
+       Rosters
+    </a>
+  </td>
+</tr>
+{% endfor %}
+</table>
+
+{% endblock %}

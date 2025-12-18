@@ -1,34 +1,52 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Manage Users</h2>
-<p class="text-muted">Change user roles (admin / operator / viewer).</p>
 
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>Email</th>
-      <th>Role</th>
-      <th>Change</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for u in users %}
+<h2 class="mb-3">Manage Users</h2>
+<p class="text-muted">Change user roles (admin / operator / viewer). Admin roles are locked.</p>
+
+<div class="table-responsive">
+  <table class="table align-middle">
+    <thead>
       <tr>
-        <td>{{ u['email'] }}</td>
-        <td>{{ u['role'] }}</td>
+        <th>Email</th>
+        <th style="width: 160px;">Role</th>
+        <th style="width: 320px;">Change</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u["email"] }}</td>
+        <td><span class="badge bg-secondary">{{ u["role"] }}</span></td>
+
         <td>
-          <form method="post" class="d-flex">
+          <form method="POST" class="d-flex gap-2">
             <input type="hidden" name="user_id" value="{{ u['id'] }}">
-            <select name="role" class="form-select form-select-sm me-2">
-              <option value="viewer"   {% if u['role']=='viewer' %}selected{% endif %}>viewer</option>
-              <option value="operator" {% if u['role']=='operator' %}selected{% endif %}>operator</option>
-              <option value="admin"    {% if u['role']=='admin' %}selected{% endif %}>admin</option>
-            </select>
-            <button class="btn btn-sm btn-primary">Save</button>
+
+            {% if u["role"] == "admin" %}
+              <select class="form-select" name="role" disabled>
+                <option selected>admin</option>
+              </select>
+              <button type="button" class="btn btn-outline-secondary" disabled>
+                Locked
+              </button>
+            {% else %}
+              <select class="form-select" name="role" required>
+                <option value="viewer" {% if u["role"] == "viewer" %}selected{% endif %}>viewer</option>
+                <option value="operator" {% if u["role"] == "operator" %}selected{% endif %}>operator</option>
+                <option value="admin" {% if u["role"] == "admin" %}selected{% endif %}>admin</option>
+              </select>
+              <button type="submit" class="btn btn-primary">
+                Save
+              </button>
+            {% endif %}
           </form>
         </td>
       </tr>
-    {% endfor %}
-  </tbody>
-</table>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
 {% endblock %}
