@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="mb-3">Saved rosters for flight {{ flight['flight_no'] }}</h2>
+<p class="text-muted">
+  {{ flight['source'] }} → {{ flight['destination'] }} |
+  {{ flight['date_time'] }} |
+  Vehicle: {{ flight['vehicle_type'] }}
+</p>
+
+<div class="mb-3">
+  <a class="btn btn-primary"
+     href="{{ url_for('generate_roster', flight_no=flight['flight_no']) }}">
+    Generate new roster
+  </a>
+
+  <a class="btn btn-outline-secondary"
+     href="{{ url_for('view_latest_roster', flight_no=flight['flight_no']) }}">
+    View latest saved roster
+  </a>
+</div>
+
+{% if rosters %}
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Roster ID</th>
+          <th>Created at (UTC)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rosters %}
+        <tr>
+          <td>{{ r['id'] }}</td>
+          <td>{{ r['created_at'] }}</td>
+          <td>
+            <a class="btn btn-sm btn-outline-primary"
+               href="{{ url_for('view_roster_by_id', roster_id=r['id']) }}">
+              Open
+            </a>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="alert alert-info">No saved rosters yet for this flight.</div>
+{% endif %}
+
+{% endblock %}

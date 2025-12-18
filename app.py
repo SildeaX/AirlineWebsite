@@ -1,4 +1,3 @@
-
 import sqlite3
 import json
 import os
@@ -439,28 +438,157 @@ def build_seat_map(vehicle_type):
     return seats
 
 
+# ✅ UPDATED: group-aware auto assignment + infant rule
 def assign_seats(vehicle_type, passengers):
     seat_map = build_seat_map(vehicle_type)
-    used = {p["seat_no"] for p in passengers if p["seat_no"]}
-    free = [s for s in seat_map if s["seat_no"] not in used]
+
+    seat_type_by_no = {s["seat_no"]: s["seat_type"] for s in seat_map}
+    all_seats = set(seat_type_by_no.keys())
+
+    # normalize + already-used seats
+    used = set()
+    for p in passengers:
+        sn = p.get("seat_no")
+        if sn:
+            sn = sn.strip().upper()
+            p["seat_no"] = sn
+            used.add(sn)
+
+    def is_infant(p):
+        return p.get("age") is not None and int(p["age"]) <= 2
+
+    # build free seats by row and side (A/B/C) (D/E/F)
+    rows = defaultdict(lambda: {"left": [], "right": []})
+    for s in seat_map:
+        sn = s["seat_no"]
+        if sn in used:
+            continue
+        row_num = int(''.join(ch for ch in sn if ch.isdigit()))
+        col = sn[-1]
+        side = "left" if col in ["A", "B", "C"] else "right"
+        rows[row_num][side].append(sn)
+
+    def sort_key(seat_no):
+        return (int(''.join(ch for ch in seat_no if ch.isdigit())), seat_no[-1])
+
+    for r in rows:
+        rows[r]["left"] = sorted(rows[r]["left"], key=sort_key)
+        rows[r]["right"] = sorted(rows[r]["right"], key=sort_key)
+
+    def find_adjacent_block(row_num, side_list, needed, wanted_type):
+        filtered = [
+            sn for sn in side_list
+            if sn not in used and seat_type_by_no.get(sn) == wanted_type and sn in all_seats
+        ]
+        cols = set(sn[-1] for sn in filtered)
+
+        if needed == 3:
+            if {"A", "B", "C"}.issubset(cols):
+                return [f"{row_num}A", f"{row_num}B", f"{row_num}C"]
+            if {"D", "E", "F"}.issubset(cols):
+                return [f"{row_num}D", f"{row_num}E", f"{row_num}F"]
+            return None
+
+        if needed == 2:
+            pairs = [("A", "B"), ("B", "C"), ("D", "E"), ("E", "F")]
+            for a, b in pairs:
+                if a in cols and b in cols:
+                    return [f"{row_num}{a}", f"{row_num}{b}"]
+            return None
+
+        return None
+
+    # 1) groups first (sit together if possible)
+    groups = defaultdict(list)
+    for p in passengers:
+        if p.get("seat_no"):
+            continue
+        if is_infant(p):
+            continue
+        gid = p.get("group_id")
+        if gid is not None:
+            groups[gid].append(p)
+
+    for gid, plist in sorted(groups.items(), key=lambda x: len(x[1]), reverse=True):
+        need = len(plist)
+        wanted_type = (plist[0].get("seat_type") or "economy")
+
+        assigned_block = None
+        for r in sorted(rows.keys()):
+            for side in ["left", "right"]:
+                block = find_adjacent_block(r, rows[r][side], need, wanted_type)
+                if block:
+                    assigned_block = block
+                    break
+            if assigned_block:
+                break
+
+        if assigned_block:
+            for p, sn in zip(plist, assigned_block):
+                p["seat_no"] = sn
+                used.add(sn)
+
+    # 2) remaining passengers individually
+    free_business = [s["seat_no"] for s in seat_map if s["seat_type"] == "business" and s["seat_no"] not in used]
+    free_economy = [s["seat_no"] for s in seat_map if s["seat_type"] == "economy" and s["seat_no"] not in used]
 
     for p in passengers:
-        if p["seat_no"]:
+        if p.get("seat_no"):
             continue
-        if p["age"] is not None and p["age"] <= 2:
-            continue  # infants no seat
-        for s in free:
-            if s["seat_type"] == p["seat_type"]:
-                p["seat_no"] = s["seat_no"]
-                used.add(s["seat_no"])
-                free.remove(s)
-                break
+        if is_infant(p):
+            continue
+
+        st = (p.get("seat_type") or "economy")
+        pool = free_business if st == "business" else free_economy
+        if pool:
+            sn = pool.pop(0)
+            p["seat_no"] = sn
+            used.add(sn)
+
     return passengers
 
 
+def build_seat_rows(vehicle_type, passengers):
+    seat_map = build_seat_map(vehicle_type)
+    seat_lookup = {p["seat_no"]: p for p in passengers if p.get("seat_no")}
+    for seat in seat_map:
+        seat["occupant"] = seat_lookup.get(seat["seat_no"])
+
+    seat_rows_dict = defaultdict(list)
+    for seat in seat_map:
+        row_num = int(''.join(ch for ch in seat["seat_no"] if ch.isdigit()))
+        seat_rows_dict[row_num].append(seat)
+
+    return {
+        row: sorted(seat_rows_dict[row], key=lambda s: s["seat_no"])
+        for row in sorted(seat_rows_dict.keys())
+    }
+
+
+# ✅ UPDATED: roster_id goes to template
+def render_roster_page(flight, roster, roster_id=None):
+    pilots = roster.get("pilots", [])
+    cabin = roster.get("cabin", [])
+    passengers = roster.get("passengers", [])
+    seat_rows = build_seat_rows(flight["vehicle_type"], passengers)
+
+    return render_template(
+        "roster.html",
+        user=current_user(),
+        flight=flight,
+        pilots=pilots,
+        cabin=cabin,
+        passengers=passengers,
+        seat_rows=seat_rows,
+        roster_id=roster_id,
+    )
+
+
+# ---------- VIEW LATEST SAVED ROSTER (DOES NOT GENERATE) ----------
+
 @app.route("/flight/<flight_no>/roster")
 @login_required()
-def flight_roster(flight_no):
+def view_latest_roster(flight_no):
     db = get_db()
 
     flight = db.execute(
@@ -471,7 +599,101 @@ def flight_roster(flight_no):
         return render_template("error.html", user=current_user(),
                                message="Flight not found")
 
-    # crew
+    row = db.execute("""
+        SELECT id, data_json FROM rosters
+        WHERE flight_no = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, (flight_no,)).fetchone()
+
+    if not row:
+        flash("No saved roster for this flight yet. Please generate one.", "warning")
+        return redirect(url_for("flight_search"))
+
+    roster = json.loads(row["data_json"])
+    log_action("INFO", "ViewLatestRoster", flight_no)
+    return render_roster_page(flight, roster, roster_id=row["id"])
+
+
+# ---------- LIST SAVED ROSTERS FOR A FLIGHT (NEW) ----------
+
+@app.route("/flight/<flight_no>/rosters")
+@login_required()
+def list_saved_rosters(flight_no):
+    db = get_db()
+
+    flight = db.execute(
+        "SELECT * FROM flights WHERE flight_no = ?", (flight_no,)
+    ).fetchone()
+    if not flight:
+        log_action("ERROR", "FlightNotFound", flight_no)
+        return render_template("error.html", user=current_user(),
+                               message="Flight not found")
+
+    rosters = db.execute("""
+        SELECT id, created_at
+        FROM rosters
+        WHERE flight_no = ?
+        ORDER BY created_at DESC
+    """, (flight_no,)).fetchall()
+
+    log_action("INFO", "ListSavedRosters", flight_no)
+    return render_template(
+        "rosters_list.html",
+        user=current_user(),
+        flight=flight,
+        rosters=rosters
+    )
+
+
+# ---------- VIEW A SPECIFIC SAVED ROSTER BY ID (NEW) ----------
+
+@app.route("/roster/<int:roster_id>")
+@login_required()
+def view_roster_by_id(roster_id):
+    db = get_db()
+
+    row = db.execute("""
+        SELECT id, flight_no, created_at, data_json
+        FROM rosters
+        WHERE id = ?
+    """, (roster_id,)).fetchone()
+
+    if not row:
+        log_action("WARN", "RosterNotFound", str(roster_id))
+        return render_template("error.html", user=current_user(),
+                               message="Roster not found")
+
+    flight = db.execute(
+        "SELECT * FROM flights WHERE flight_no = ?", (row["flight_no"],)
+    ).fetchone()
+
+    if not flight:
+        log_action("ERROR", "FlightNotFoundForRoster", row["flight_no"])
+        return render_template("error.html", user=current_user(),
+                               message="Flight not found")
+
+    roster = json.loads(row["data_json"])
+    log_action("INFO", "ViewRosterById", f"id={roster_id}")
+    return render_roster_page(flight, roster, roster_id=row["id"])
+
+
+# ---------- GENERATE NEW ROSTER (SAVES TO DB) ----------
+
+@app.route("/flight/<flight_no>/generate_roster")
+@login_required()
+def generate_roster(flight_no):
+    db = get_db()
+
+    flight = db.execute(
+        "SELECT * FROM flights WHERE flight_no = ?", (flight_no,)
+    ).fetchone()
+    if not flight:
+        log_action("ERROR", "FlightNotFound", flight_no)
+        return render_template("error.html", user=current_user(),
+                               message="Flight not found")
+
+    # pilots
     all_pilots = db.execute("""
         SELECT * FROM pilots
         WHERE vehicle_type = ? AND max_distance_km >= ?
@@ -483,14 +705,15 @@ def flight_roster(flight_no):
 
     crew_pilots = []
     if seniors:
-        crew_pilots.append(seniors[0])
+        crew_pilots.append(dict(seniors[0]))
     if juniors:
-        crew_pilots.append(juniors[0])
+        crew_pilots.append(dict(juniors[0]))
     if trainees:
-        crew_pilots.append(trainees[0])
+        crew_pilots.append(dict(trainees[0]))  # şimdilik 1 trainee
 
+    # cabin
     att_all = db.execute("SELECT * FROM attendants").fetchall()
-    cabin = [a for a in att_all if flight["vehicle_type"] in (a["vehicle_types"] or "")]
+    cabin = [dict(a) for a in att_all if flight["vehicle_type"] in (a["vehicle_types"] or "")]
     cabin = cabin[:6]
 
     # passengers
@@ -498,49 +721,27 @@ def flight_roster(flight_no):
         SELECT * FROM passengers WHERE flight_no = ?
     """, (flight_no,)).fetchall()
     passengers = [dict(p) for p in pass_rows]
-
     passengers = assign_seats(flight["vehicle_type"], passengers)
 
-    # seat map for plane view
-    seat_map = build_seat_map(flight["vehicle_type"])
-    seat_lookup = {p["seat_no"]: p for p in passengers if p["seat_no"]}
-    for seat in seat_map:
-        seat["occupant"] = seat_lookup.get(seat["seat_no"])
-    seat_rows_dict = defaultdict(list)
-    for seat in seat_map:
-        row_num = int(''.join(ch for ch in seat["seat_no"] if ch.isdigit()))
-        seat_rows_dict[row_num].append(seat)
-    seat_rows = {
-        row: sorted(seat_rows_dict[row], key=lambda s: s["seat_no"])
-        for row in sorted(seat_rows_dict.keys())
-    }
-
-    # roster object
     roster = {
         "flight": dict(flight),
-        "pilots": [dict(p) for p in crew_pilots],
-        "cabin": [dict(c) for c in cabin],
+        "pilots": crew_pilots,
+        "cabin": cabin,
         "passengers": passengers,
     }
 
-    # save automatically to SQL
-    db.execute("""
+    # save only here (and keep new roster_id)
+    cur = db.execute("""
         INSERT INTO rosters (flight_no, created_at, data_json)
         VALUES (?, ?, ?)
     """, (flight_no, datetime.utcnow().isoformat(), json.dumps(roster)))
     db.commit()
 
-    log_action("INFO", "GenerateRoster", flight_no)
+    new_roster_id = cur.lastrowid
 
-    return render_template(
-        "roster.html",
-        user=current_user(),
-        flight=flight,
-        pilots=crew_pilots,
-        cabin=cabin,
-        passengers=passengers,
-        seat_rows=seat_rows,
-    )
+    log_action("INFO", "GenerateRoster", flight_no)
+    flash("Roster generated and saved.", "success")
+    return render_roster_page(flight, roster, roster_id=new_roster_id)
 
 
 # ---------- MANUAL SEAT UPDATE (operator/admin) ----------
@@ -551,21 +752,98 @@ def update_seat(flight_no):
     user = current_user()
     if user["role"] not in ("operator", "admin"):
         flash("Only operators or admins can change seats.", "danger")
-        return redirect(url_for("flight_roster", flight_no=flight_no))
+        return redirect(url_for("view_latest_roster", flight_no=flight_no))
 
-    passenger_id = request.form["passenger_id"]
+    roster_id = request.form.get("roster_id")
+    passenger_id = int(request.form["passenger_id"])
     new_seat = request.form["seat_no"].strip().upper()
 
     db = get_db()
+
+    flight = db.execute(
+        "SELECT * FROM flights WHERE flight_no = ?",
+        (flight_no,)
+    ).fetchone()
+    if not flight:
+        return render_template("error.html", user=current_user(), message="Flight not found")
+
+    # seat must exist in this aircraft layout
+    seat_map = build_seat_map(flight["vehicle_type"])
+    seat_type_by_no = {s["seat_no"]: s["seat_type"] for s in seat_map}
+    if new_seat not in seat_type_by_no:
+        flash("Invalid seat number for this aircraft.", "danger")
+        return redirect(url_for("view_latest_roster", flight_no=flight_no))
+
+    # load roster (specific roster_id or latest)
+    if roster_id:
+        row = db.execute(
+            "SELECT id, data_json FROM rosters WHERE id = ? AND flight_no = ?",
+            (roster_id, flight_no)
+        ).fetchone()
+    else:
+        row = db.execute("""
+            SELECT id, data_json FROM rosters
+            WHERE flight_no = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (flight_no,)).fetchone()
+
+    if not row:
+        flash("No saved roster found.", "warning")
+        return redirect(url_for("flight_search"))
+
+    roster = json.loads(row["data_json"])
+    passengers = roster.get("passengers", [])
+
+    # find passenger in roster json
+    target = None
+    for p in passengers:
+        if int(p.get("id", -1)) == passenger_id:
+            target = p
+            break
+
+    if not target:
+        flash("Passenger not found in this roster.", "danger")
+        return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
+
+    # infant rule
+    if target.get("age") is not None and int(target["age"]) <= 2:
+        flash("Infants (0-2) cannot be assigned a seat.", "danger")
+        return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
+
+    # seat class match (business/economy)
+    passenger_class = (target.get("seat_type") or "economy")
+    if seat_type_by_no[new_seat] != passenger_class:
+        flash(f"Seat class mismatch. Passenger is {passenger_class}.", "danger")
+        return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
+
+    # occupancy check inside this roster
+    for p in passengers:
+        if p.get("seat_no") and str(p["seat_no"]).upper() == new_seat and int(p.get("id", -1)) != passenger_id:
+            flash("Seat is already occupied.", "danger")
+            return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
+
+    old_seat = target.get("seat_no")
+    target["seat_no"] = new_seat
+
+    # write roster json back
+    db.execute(
+        "UPDATE rosters SET data_json = ? WHERE id = ?",
+        (json.dumps(roster), row["id"])
+    )
+    db.commit()
+
+    # optional consistency: also update passengers table
     db.execute(
         "UPDATE passengers SET seat_no = ? WHERE id = ? AND flight_no = ?",
         (new_seat, passenger_id, flight_no),
     )
     db.commit()
+
     log_action("INFO", "ManualSeatChange",
-               f"flight={flight_no}, passenger_id={passenger_id}, seat={new_seat}")
+               f"flight={flight_no}, roster_id={row['id']}, passenger_id={passenger_id}, {old_seat}->{new_seat}")
     flash("Seat updated.", "success")
-    return redirect(url_for("flight_roster", flight_no=flight_no))
+    return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
 
 
 # ---------- SAVE ROSTER TO NoSQL JSON ----------
@@ -581,7 +859,7 @@ def save_roster_nosql(flight_no):
     """, (flight_no,)).fetchone()
     if not row:
         flash("No roster found to save.", "warning")
-        return redirect(url_for("flight_roster", flight_no=flight_no))
+        return redirect(url_for("flight_search"))
 
     roster = json.loads(row["data_json"])
 
@@ -598,7 +876,7 @@ def save_roster_nosql(flight_no):
 
     log_action("INFO", "SaveRosterNoSQL", flight_no)
     flash("Roster saved to NoSQL JSON file.", "success")
-    return redirect(url_for("flight_roster", flight_no=flight_no))
+    return redirect(url_for("view_latest_roster", flight_no=flight_no))
 
 
 # ---------- EXPORT JSON ----------
@@ -692,5 +970,3 @@ if __name__ == "__main__":
             init_db()
 
     app.run(debug=True, host="0.0.0.0", port=5001)
-
-

@@ -13,6 +13,21 @@
   Download JSON
 </a>
 
+<a class="btn btn-outline-dark mb-4"
+   href="{{ url_for('list_saved_rosters', flight_no=flight['flight_no']) }}">
+  Saved rosters list
+</a>
+
+<a class="btn btn-outline-primary mb-4"
+   href="{{ url_for('view_latest_roster', flight_no=flight['flight_no']) }}">
+  View latest saved roster
+</a>
+
+<a class="btn btn-primary mb-4"
+   href="{{ url_for('generate_roster', flight_no=flight['flight_no']) }}">
+  Generate new roster
+</a>
+
 <style>
   /* --- plane view style --- */
   .seat-legend span {
@@ -104,7 +119,7 @@
 </style>
 
 <div class="row">
-  <!-- LEFT: PILOTS + CABIN CREW (like your 3rd screenshot) -->
+  <!-- LEFT: PILOTS + CABIN CREW -->
   <div class="col-md-3 mb-4">
     <div class="crew-panel">
       <h5>Pilots</h5>
@@ -142,6 +157,7 @@
             <th>Name</th>
             <th>Role / Seat type</th>
             <th>Seat No</th>
+            <th style="min-width: 220px;">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -151,6 +167,7 @@
               <td>{{ p['name'] }}</td>
               <td>{{ p['seniority'] }}</td>
               <td>-</td>
+              <td><span class="text-muted">-</span></td>
             </tr>
           {% endfor %}
           {% for c in cabin %}
@@ -159,14 +176,34 @@
               <td>{{ c['name'] }}</td>
               <td>{{ c['attendant_type'] }}</td>
               <td>-</td>
+              <td><span class="text-muted">-</span></td>
             </tr>
           {% endfor %}
+
           {% for pa in passengers %}
             <tr>
               <td>Passenger</td>
               <td>{{ pa['name'] }}</td>
               <td>{{ pa['seat_type'] }}</td>
               <td>{{ pa['seat_no'] or '-' }}</td>
+              <td>
+                {% if user and user['role'] in ['admin','operator'] and (pa['age'] is none or pa['age'] > 2) %}
+                  <form method="post"
+                        action="{{ url_for('update_seat', flight_no=flight['flight_no']) }}"
+                        class="d-flex gap-2 align-items-center">
+                    <input type="hidden" name="roster_id" value="{{ roster_id }}">
+                    <input type="hidden" name="passenger_id" value="{{ pa['id'] }}">
+                    <input type="text" name="seat_no"
+                           class="form-control form-control-sm"
+                           placeholder="e.g. 4B"
+                           style="max-width: 90px;"
+                           required>
+                    <button class="btn btn-sm btn-outline-success">Save</button>
+                  </form>
+                {% else %}
+                  <span class="text-muted">-</span>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -239,7 +276,7 @@
               </span>
             {% endfor %}
 
-            {# pad if fewer than 3 seats (should not happen but safe) #}
+            {# pad if fewer than 3 seats #}
             {% for i in range(3 - left|length) %}
               <span class="seat-box seat-empty"></span>
             {% endfor %}
