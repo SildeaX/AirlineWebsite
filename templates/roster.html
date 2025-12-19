@@ -1,391 +1,391 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h2 class="mb-3">Roster for flight {{ flight['flight_no'] }}</h2>
+<style>
+  .plane-wrap {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+
+  /* Crew panel (left) */
+  .crew-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 14px;
+    background: #fff;
+  }
+  .crew-card h5 { margin: 10px 0 8px; }
+  .crew-list { margin: 0; padding-left: 18px; }
+  .crew-list li { margin: 4px 0; }
+
+  .right-col { display: block; }
+
+  /* Plane + Tabular side-by-side */
+  .views-grid {
+    display: grid;
+    grid-template-columns: auto minmax(320px, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  /* Plane body (tight to seats) */
+  .plane-body {
+    position: relative;
+    padding: 22px 20px 26px;
+    border-radius: 40px;
+    background: #ffffff;
+    border: 2px solid #0f172a;
+    overflow: hidden;
+    display: inline-block;
+    width: fit-content;
+  }
+
+  .plane-body::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 10% 10%, rgba(0,0,0,0.05) 0, transparent 45%),
+      radial-gradient(circle at 90% 20%, rgba(0,0,0,0.04) 0, transparent 55%),
+      linear-gradient(to bottom, rgba(0,0,0,0.02), transparent 40%, rgba(0,0,0,0.02));
+    pointer-events: none;
+  }
+
+  .plane-title { position: relative; margin: 0 0 10px; font-weight: 800; }
+  .plane-sub   { position: relative; margin: 0 0 14px; color: #64748b; }
+
+  /* Seat grid */
+  .seat-grid {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: fit-content;
+    padding-top: 10px;
+  }
+
+  .seat-row {
+    display: grid;
+    grid-template-columns: 34px auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .row-num {
+    font-weight: 700;
+    color: #0f172a;
+    text-align: right;
+    padding-right: 6px;
+  }
+
+  .row-seats {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: fit-content;
+    flex-wrap: nowrap;
+  }
+
+  .seat-block {
+    display: flex;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 14px;
+    background: rgba(15,23,42,0.03);
+    border: 1px solid rgba(15,23,42,0.10);
+  }
+
+  .aisle-label {
+    font-size: 12px;
+    color: #94a3b8;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    user-select: none;
+  }
+
+  .seat {
+    width: 46px;
+    height: 46px;
+    border: 2px solid #0f172a;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    background: #fff;
+    position: relative;
+    user-select: none;
+    line-height: 1;
+  }
+
+  .seat.business { background: rgba(37, 99, 235, 0.08); }
+  .seat.economy  { background: rgba(16, 185, 129, 0.07); }
+
+  .seat.occupied { outline: 3px solid rgba(239, 68, 68, 0.35); }
+
+  .seat small {
+    position: absolute;
+    bottom: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #475569;
+    max-width: 42px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* -------- Tabular view card (right) -------- */
+  .tab-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #fff;
+    padding: 14px;
+    min-height: 200px;
+  }
+
+  .tab-card h4 { margin: 0 0 10px; font-weight: 800; }
+  .tab-help { color: #64748b; margin-bottom: 10px; font-size: 14px; }
+
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(15,23,42,0.15);
+    background: rgba(15,23,42,0.03);
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  @media (max-width: 1200px) {
+    .views-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 1100px) {
+    .plane-wrap { grid-template-columns: 1fr; }
+  }
+</style>
+
+<h2 class="mb-2">Roster for flight {{ flight['flight_no'] }}</h2>
 <p class="text-muted">
   {{ flight['source'] }} → {{ flight['destination'] }} |
   {{ flight['date_time'] }} |
   Vehicle: {{ flight['vehicle_type'] }}
 </p>
 
-<a class="btn btn-outline-secondary mb-4"
-   href="{{ url_for('export_roster', flight_no=flight['flight_no']) }}">
-  Download JSON
-</a>
+<div class="plane-wrap">
 
-<a class="btn btn-outline-dark mb-4"
-   href="{{ url_for('list_saved_rosters', flight_no=flight['flight_no']) }}">
-  Saved rosters list
-</a>
+  <!-- LEFT: Crew -->
+  <div class="crew-card">
+    <h5>Pilots</h5>
+    <ul class="crew-list">
+      {% for p in pilots %}
+        <li>{{ p['name'] }} <span class="text-muted">({{ p['seniority'] }})</span></li>
+      {% endfor %}
+    </ul>
 
-<a class="btn btn-outline-primary mb-4"
-   href="{{ url_for('view_latest_roster', flight_no=flight['flight_no']) }}">
-  View latest saved roster
-</a>
-
-<a class="btn btn-primary mb-4"
-   href="{{ url_for('generate_roster', flight_no=flight['flight_no']) }}">
-  Generate new roster
-</a>
-
-<style>
-  /* --- plane view style --- */
-  .seat-legend span {
-    display: inline-block;
-    padding: 4px 8px;
-    margin-right: 8px;
-    margin-bottom: 4px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-  }
-  .legend-empty { background: #e0e0e0; }
-  .legend-eco   { background: #b3e5fc; }
-  .legend-biz   { background: #ffcdd2; }
-
-  .seat-grid {
-    border: 1px solid #ccc;
-    padding: 12px;
-    border-radius: 8px;
-    background: #fafafa;
-  }
-
-  .seat-row-label {
-    width: 40px;
-    text-align: center;
-    font-weight: 600;
-  }
-
-  .seat-box {
-    width: 28px;
-    height: 28px;
-    line-height: 26px;
-    text-align: center;
-    border-radius: 4px;
-    font-size: 0.7rem;
-    margin: 2px;
-    display: inline-block;
-    border: 1px solid #bbb;
-  }
-  .seat-empty { background: #e0e0e0; }
-  .seat-eco   { background: #b3e5fc; }
-  .seat-biz   { background: #ffcdd2; }
-  .seat-occupied {
-    font-weight: 700;
-    border-width: 2px;
-  }
-
-  .aisle {
-    width: 16px;
-    display: inline-block;
-  }
-
-  .crew-panel {
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 10px;
-    background: #f8f9fa;
-    max-height: 600px;
-    overflow-y: auto;
-  }
-
-  .crew-panel h5 {
-    font-size: 1rem;
-    margin-top: 8px;
-    margin-bottom: 4px;
-  }
-
-  .crew-panel ul {
-    list-style: none;
-    padding-left: 0;
-    margin-bottom: 8px;
-  }
-
-  .crew-panel li {
-    font-size: 0.9rem;
-    padding: 2px 0;
-    border-bottom: 1px dotted #ccc;
-  }
-
-  .crew-role {
-    font-weight: 600;
-    margin-right: 4px;
-  }
-
-  .table-fixed-header thead th {
-    position: sticky;
-    top: 0;
-    background: #f1f1f1;
-  }
-</style>
-
-<div class="row">
-  <!-- LEFT: PILOTS + CABIN CREW -->
-  <div class="col-md-3 mb-4">
-    <div class="crew-panel">
-      <h5>Pilots</h5>
-      <ul>
-        {% for p in pilots %}
-          <li>
-            <span class="crew-role">{{ p['seniority']|capitalize }}</span>
-            {{ p['name'] }}
-          </li>
-        {% endfor %}
-      </ul>
-
-      <h5>Cabin Crew</h5>
-      <ul>
-        {% for c in cabin %}
-          <li>
-            <span class="crew-role">{{ c['attendant_type']|capitalize }}</span>
-            {{ c['name'] }}
-          </li>
-        {% endfor %}
-      </ul>
-    </div>
-  </div>
-
-  <!-- RIGHT: TABULAR + PLANE VIEW -->
-  <div class="col-md-9 mb-4">
-
-    <!-- =============== TABULAR VIEW =============== -->
-    <h3>Tabular View</h3>
-    <div class="table-responsive">
-      <table class="table table-bordered table-sm table-fixed-header">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Name</th>
-            <th>Role / Seat type</th>
-            <th>Seat No</th>
-            <th style="min-width: 220px;">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in pilots %}
-            <tr>
-              <td>Pilot</td>
-              <td>{{ p['name'] }}</td>
-              <td>{{ p['seniority'] }}</td>
-              <td>-</td>
-              <td><span class="text-muted">-</span></td>
-            </tr>
-          {% endfor %}
-          {% for c in cabin %}
-            <tr>
-              <td>Cabin crew</td>
-              <td>{{ c['name'] }}</td>
-              <td>{{ c['attendant_type'] }}</td>
-              <td>-</td>
-              <td><span class="text-muted">-</span></td>
-            </tr>
-          {% endfor %}
-
-          {% for pa in passengers %}
-            <tr>
-              <td>Passenger</td>
-              <td>{{ pa['name'] }}</td>
-              <td>{{ pa['seat_type'] }}</td>
-              <td>{{ pa['seat_no'] or '-' }}</td>
-              <td>
-                {% if user and user['role'] in ['admin','operator'] and (pa['age'] is none or pa['age'] > 2) %}
-                  <form method="post"
-                        action="{{ url_for('update_seat', flight_no=flight['flight_no']) }}"
-                        class="d-flex gap-2 align-items-center">
-                    <input type="hidden" name="roster_id" value="{{ roster_id }}">
-                    <input type="hidden" name="passenger_id" value="{{ pa['id'] }}">
-                    <input type="text" name="seat_no"
-                           class="form-control form-control-sm"
-                           placeholder="e.g. 4B"
-                           style="max-width: 90px;"
-                           required>
-                    <button class="btn btn-sm btn-outline-success">Save</button>
-                  </form>
-                {% else %}
-                  <span class="text-muted">-</span>
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <h5 class="mt-3">Cabin Crew</h5>
+    <ul class="crew-list">
+      {% for c in cabin %}
+        <li>{{ c['name'] }} <span class="text-muted">({{ c.get('attendant_type','') }})</span></li>
+      {% endfor %}
+    </ul>
 
     <hr>
 
-    <!-- =============== PLANE VIEW (seat map) =============== -->
-    <h3>Plane View</h3>
-    <p class="text-muted">
-      Business rows are at the front. Each square is a seat (A–F). B = Business, E = Economy.
-    </p>
+    <div class="d-grid gap-2">
+      <a class="btn btn-outline-secondary"
+         href="{{ url_for('list_saved_rosters', flight_no=flight['flight_no']) }}">
+        Saved rosters
+      </a>
 
-    <div class="mb-2 seat-legend">
-      <span class="legend-empty">Empty seat</span>
-      <span class="legend-eco">Occupied Economy</span>
-      <span class="legend-biz">Occupied Business</span>
+      <a class="btn btn-primary"
+         href="{{ url_for('generate_roster', flight_no=flight['flight_no']) }}">
+        Generate new roster
+      </a>
     </div>
+  </div>
 
-    <div class="seat-grid">
-      <!-- header A–F -->
-      <div class="d-flex mb-2">
-        <div class="seat-row-label"></div>
-        <div class="flex-grow-1 text-center">
-          <span class="seat-box seat-empty">A</span>
-          <span class="seat-box seat-empty">B</span>
-          <span class="seat-box seat-empty">C</span>
-          <span class="aisle"></span>
-          <span class="seat-box seat-empty">D</span>
-          <span class="seat-box seat-empty">E</span>
-          <span class="seat-box seat-empty">F</span>
+  <!-- RIGHT: Plane view always visible; tabular only for admin/operator -->
+  <div class="right-col">
+
+    <div class="views-grid">
+
+      <!-- Plane View (visible to all) -->
+      <div class="plane-body">
+        <h3 class="plane-title">Plane View</h3>
+        <p class="plane-sub">
+          {% if flight['vehicle_type'] == 'A330' %}
+            Layout: ABC | DE | FGH
+          {% else %}
+            Layout: ABC | DEF
+          {% endif %}
+        </p>
+
+        <div class="seat-grid">
+          {% for row_num, seats in seat_rows.items() %}
+
+            {% set seat_by_col = {} %}
+            {% for s in seats %}
+              {% set _ = seat_by_col.update({ s['seat_no'][-1] : s }) %}
+            {% endfor %}
+
+            <div class="seat-row">
+              <div class="row-num">{{ row_num }}</div>
+
+              <div class="row-seats">
+
+                {% if flight['vehicle_type'] == 'A330' %}
+                  <!-- A330: ABC | DE | FGH -->
+                  <div class="seat-block">
+                    {% for col in ['A','B','C'] %}
+                      {% set s = seat_by_col.get(col) %}
+                      {% if s %}
+                        <div class="seat {{ s['seat_type'] }} {% if s.get('occupant') %}occupied{% endif %}">
+                          {{ col }}
+                          {% if s.get('occupant') and user['role'] in ['admin','operator'] %}
+                            <small>{{ s['occupant']['name'] }}</small>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+
+                  <div class="aisle-label">aisle</div>
+
+                  <div class="seat-block">
+                    {% for col in ['D','E'] %}
+                      {% set s = seat_by_col.get(col) %}
+                      {% if s %}
+                        <div class="seat {{ s['seat_type'] }} {% if s.get('occupant') %}occupied{% endif %}">
+                          {{ col }}
+                          {% if s.get('occupant') and user['role'] in ['admin','operator'] %}
+                            <small>{{ s['occupant']['name'] }}</small>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+
+                  <div class="aisle-label">aisle</div>
+
+                  <div class="seat-block">
+                    {% for col in ['F','G','H'] %}
+                      {% set s = seat_by_col.get(col) %}
+                      {% if s %}
+                        <div class="seat {{ s['seat_type'] }} {% if s.get('occupant') %}occupied{% endif %}">
+                          {{ col }}
+                          {% if s.get('occupant') and user['role'] in ['admin','operator'] %}
+                            <small>{{ s['occupant']['name'] }}</small>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+
+                {% else %}
+                  <!-- 6-seat planes: ABC | DEF -->
+                  <div class="seat-block">
+                    {% for col in ['A','B','C'] %}
+                      {% set s = seat_by_col.get(col) %}
+                      {% if s %}
+                        <div class="seat {{ s['seat_type'] }} {% if s.get('occupant') %}occupied{% endif %}">
+                          {{ col }}
+                          {% if s.get('occupant') and user['role'] in ['admin','operator'] %}
+                            <small>{{ s['occupant']['name'] }}</small>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+
+                  <div class="aisle-label">aisle</div>
+
+                  <div class="seat-block">
+                    {% for col in ['D','E','F'] %}
+                      {% set s = seat_by_col.get(col) %}
+                      {% if s %}
+                        <div class="seat {{ s['seat_type'] }} {% if s.get('occupant') %}occupied{% endif %}">
+                          {{ col }}
+                          {% if s.get('occupant') and user['role'] in ['admin','operator'] %}
+                            <small>{{ s['occupant']['name'] }}</small>
+                          {% endif %}
+                        </div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% endif %}
+
+              </div>
+            </div>
+
+          {% endfor %}
         </div>
       </div>
 
-      {% for row_num, seats in seat_rows.items() %}
-        {# split seats into left (A–C) and right (D–F) #}
-        {% set left = [] %}
-        {% set right = [] %}
-        {% for s in seats %}
-          {% if s['seat_no'][-1] in ['A', 'B', 'C'] %}
-            {% set _ = left.append(s) %}
-          {% else %}
-            {% set _ = right.append(s) %}
-          {% endif %}
-        {% endfor %}
-
-        <div class="d-flex align-items-center mb-1">
-          <div class="seat-row-label">{{ row_num }}</div>
-          <div class="flex-grow-1">
-
-            {# left side A–C #}
-            {% for s in left %}
-              {% set occ = s['occupant'] %}
-              {% set type_class = 'seat-empty' %}
-              {% if occ %}
-                {% if s['seat_type'] == 'business' %}
-                  {% set type_class = 'seat-biz seat-occupied' %}
-                {% else %}
-                  {% set type_class = 'seat-eco seat-occupied' %}
-                {% endif %}
-              {% endif %}
-              <span class="seat-box {{ type_class }}"
-                    title="{% if occ %}{{ occ['name'] }} ({{ occ['seat_type'] }}){% else %}Empty{% endif %}">
-                {% if occ %}
-                  {{ 'B' if occ['seat_type'] == 'business' else 'E' }}
-                {% else %}
-                  &nbsp;
-                {% endif %}
-              </span>
-            {% endfor %}
-
-            {# pad if fewer than 3 seats #}
-            {% for i in range(3 - left|length) %}
-              <span class="seat-box seat-empty"></span>
-            {% endfor %}
-
-            <span class="aisle"></span>
-
-            {# right side D–F #}
-            {% for s in right %}
-              {% set occ = s['occupant'] %}
-              {% set type_class = 'seat-empty' %}
-              {% if occ %}
-                {% if s['seat_type'] == 'business' %}
-                  {% set type_class = 'seat-biz seat-occupied' %}
-                {% else %}
-                  {% set type_class = 'seat-eco seat-occupied' %}
-                {% endif %}
-              {% endif %}
-              <span class="seat-box {{ type_class }}"
-                    title="{% if occ %}{{ occ['name'] }} ({{ occ['seat_type'] }}){% else %}Empty{% endif %}">
-                {% if occ %}
-                  {{ 'B' if occ['seat_type'] == 'business' else 'E' }}
-                {% else %}
-                  &nbsp;
-                {% endif %}
-              </span>
-            {% endfor %}
-
-            {% for i in range(3 - right|length) %}
-              <span class="seat-box seat-empty"></span>
-            {% endfor %}
-          </div>
+      <!-- Tabular View (ONLY admin/operator) -->
+      {% if user['role'] in ['admin','operator'] %}
+      <div class="tab-card">
+        <h4>Tabular View</h4>
+        <div class="tab-help">
+          List of all people in this roster (crew + passengers). Visible only to Operator/Admin.
         </div>
-      {% endfor %}
+
+        <div class="table-responsive">
+          <table class="table table-sm table-striped">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Name</th>
+                <th>Role / Seat type</th>
+                <th>Seat No</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in pilots %}
+                <tr>
+                  <td>Pilot</td>
+                  <td>{{ p['name'] }}</td>
+                  <td><span class="pill">{{ p['seniority'] }}</span></td>
+                  <td>-</td>
+                </tr>
+              {% endfor %}
+
+              {% for c in cabin %}
+                <tr>
+                  <td>Cabin</td>
+                  <td>{{ c['name'] }}</td>
+                  <td><span class="pill">{{ c.get('attendant_type','crew') }}</span></td>
+                  <td>-</td>
+                </tr>
+              {% endfor %}
+
+              {% for pax in passengers %}
+                <tr>
+                  <td>Passenger</td>
+                  <td>{{ pax['name'] }}</td>
+                  <td>
+                    <span class="pill">{{ pax.get('seat_type','economy') }}</span>
+                    {% if pax.get('age') is not none and pax['age']|int <= 2 %}
+                      <span class="pill">infant</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if pax.get('seat_no') %}{{ pax['seat_no'] }}{% else %}-{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
     </div>
 
-  </div> <!-- /col-md-9 -->
-</div> <!-- /row -->
+  </div>
 
-<hr>
-
-<!-- =============== EXTENDED VIEW =============== -->
-<h3 class="mt-4">Extended View</h3>
-
-<h4>Pilots</h4>
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Seniority</th>
-      <th>Languages</th>
-      <th>Nationality</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for p in pilots %}
-      <tr>
-        <td>{{ p['name'] }}</td>
-        <td>{{ p['seniority'] }}</td>
-        <td>{{ p['languages'] }}</td>
-        <td>{{ p['nationality'] }}</td>
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
-
-<h4>Cabin Crew</h4>
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Type</th>
-      <th>Languages</th>
-      <th>Nationality</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for c in cabin %}
-      <tr>
-        <td>{{ c['name'] }}</td>
-        <td>{{ c['attendant_type'] }}</td>
-        <td>{{ c['languages'] }}</td>
-        <td>{{ c['nationality'] }}</td>
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
-
-<h4>Passengers</h4>
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Age</th>
-      <th>Seat type</th>
-      <th>Seat no</th>
-      <th>Nationality</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for pa in passengers %}
-      <tr>
-        <td>{{ pa['name'] }}</td>
-        <td>{{ pa['age'] }}</td>
-        <td>{{ pa['seat_type'] }}</td>
-        <td>{{ pa['seat_no'] or '-' }}</td>
-        <td>{{ pa['nationality'] }}</td>
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
+</div>
 
 {% endblock %}
