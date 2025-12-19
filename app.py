@@ -511,26 +511,27 @@ def manage_booking(pnr):
     if not passengers:
         return redirect(url_for("checkin"))
     
-    # Convert sqlite3.Row objects to dictionaries for template compatibility
+    # Convert to dict
     passengers = [dict(p) for p in passengers]
-    
-    # Get flight details
     flight = db.execute("SELECT * FROM flights WHERE flight_no = ?", (passengers[0]["flight_no"],)).fetchone()
     
+    # --- FIX START: Fetch Mock Crew Data for Live View ---
+    # (In a real app, you would filter these by flight_id/schedule)
+    pilots = [dict(p) for p in db.execute("SELECT * FROM pilots LIMIT 2")]
+    cabin = [dict(a) for a in db.execute("SELECT * FROM attendants LIMIT 4")]
+    # --- FIX END ---
+
     # Handle seat change request (POST)
     if request.method == "POST":
         passenger_id = int(request.form.get("passenger_id"))
         new_seat = request.form.get("new_seat", "").strip().upper()
         
-        # Find the specific passenger in the PNR group
         target_pax = next((p for p in passengers if p["id"] == passenger_id), None)
         
         if target_pax:
-            # Validate the new seat against the seat map
             seat_map = build_seat_map(flight["vehicle_type"])
             target_seat_info = next((s for s in seat_map if s["seat_no"] == new_seat), None)
             
-            # Check if the seat is already occupied
             occupant = db.execute("SELECT * FROM passengers WHERE flight_no = ? AND seat_no = ?", 
                                   (flight["flight_no"], new_seat)).fetchone()
             
@@ -541,45 +542,28 @@ def manage_booking(pnr):
             elif occupant:
                 flash("Seat occupied.", "danger")
             else:
-                # Update the seat in the database
                 db.execute("UPDATE passengers SET seat_no = ? WHERE id = ?", (new_seat, passenger_id))
                 db.commit()
                 flash("Seat changed.", "success")
                 return redirect(url_for("manage_booking", pnr=pnr))
 
     # PREPARE DATA FOR VISUAL SEAT MAP
-    # 1. Fetch ALL passengers for the flight to show occupied seats
+    # Fetch ALL passengers for the flight to show occupied seats (Live Data)
     all_rows = db.execute("SELECT * FROM passengers WHERE flight_no = ?", (flight["flight_no"],)).fetchall()
-    
-    # 2. Convert sqlite3.Row objects to dictionaries to use .get() method safely
     full_pax_list = [dict(row) for row in all_rows]
     
-    # 3. Build the visual seat map using the dictionary list
     seat_rows = build_seat_rows(flight["vehicle_type"], full_pax_list)
     
-    # 4. Calculate available seats for the dropdown menu
     occupied_set = set(p["seat_no"] for p in full_pax_list if p.get("seat_no"))
     all_seat_map = build_seat_map(flight["vehicle_type"])
     available_seats = [s for s in all_seat_map if s["seat_no"] not in occupied_set]
 
+    # Pass 'pilots' and 'cabin' so the partial template renders correctly
     return render_template("manage_booking.html", 
                            user=current_user(), pnr=pnr, flight=flight, 
                            passengers=passengers, seat_rows=seat_rows, 
-                           available_seats=available_seats)
-
-    # Data for rendering
-    all_flight_pax = db.execute("SELECT seat_no FROM passengers WHERE flight_no = ?", (flight["flight_no"],)).fetchall()
-    occupied_set = set(p["seat_no"] for p in all_flight_pax if p["seat_no"])
-    
-    seat_rows = build_seat_rows(flight["vehicle_type"], all_flight_pax)
-    
-    all_seat_map = build_seat_map(flight["vehicle_type"])
-    available_seats = [s for s in all_seat_map if s["seat_no"] not in occupied_set]
-
-    return render_template("manage_booking.html", 
-                           user=current_user(), pnr=pnr, flight=flight, 
-                           passengers=passengers, seat_rows=seat_rows, 
-                           available_seats=available_seats)
+                           available_seats=available_seats,
+                           pilots=pilots, cabin=cabin) # Added pilots/cabin
 
 # ---------- ROSTER / ADMIN ROUTES ----------
 
@@ -587,9 +571,18 @@ def manage_booking(pnr):
 @login_required()
 def generate_roster(flight_no):
     """Generates roster for Admin/Operator (Simplified logic)."""
+    user = current_user()
+    
+    # --- FIX START: Permission Check ---
+    if user["role"] not in ["admin", "operator"]:
+        flash("You do not have permission to generate rosters.", "danger")
+        return redirect(url_for("dashboard"))
+    # --- FIX END ---
+
     db = get_db()
     flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
     
+    # Fetch LIVE passengers to save into the snapshot
     passengers = [dict(p) for p in db.execute("SELECT * FROM passengers WHERE flight_no=?", (flight_no,)).fetchall()]
     
     # Mock Pilots/Cabin
@@ -607,6 +600,7 @@ def generate_roster(flight_no):
                (flight_no, utc_now_iso(), json.dumps(roster)))
     db.commit()
     
+    flash("New roster snapshot generated successfully.", "success")
     return redirect(url_for("view_roster_by_id", roster_id=cur.lastrowid))
 
 @app.route("/flight/<flight_no>/roster")
