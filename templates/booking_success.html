@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="alert alert-success text-center">
+    <h1 class="display-4">Booking Confirmed!</h1>
+    <p class="lead">Your PNR Code:</p>
+    <h2 class="fw-bold text-dark p-3 bg-light d-inline-block rounded border">{{ pnr }}</h2>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header">
+        Flight Summary: {{ flight['flight_no'] }}
+    </div>
+    <div class="card-body">
+        <p>
+            <strong>From:</strong> {{ flight['source'] }} <br>
+            <strong>To:</strong> {{ flight['destination'] }} <br>
+            <strong>Date:</strong> {{ flight['date_time'] }}
+        </p>
+
+        <table class="table table-striped mt-3">
+            <thead>
+                <tr>
+                    <th>Passenger Name</th>
+                    <th>SSN (Identity No)</th>
+                    <th>Seat Class</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in passengers %}
+                <tr>
+                    <td>{{ p['name'] }}</td>
+                    <td>{{ p['ssn'] }}</td>
+                    <td><span class="badge bg-info text-dark">{{ p['seat_type'] }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer text-end">
+        <a href="{{ url_for('flight_search') }}" class="btn btn-primary">Book Another Flight</a>
+    </div>
+</div>
+
+{% endblock %}

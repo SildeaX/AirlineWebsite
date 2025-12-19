@@ -6,26 +6,26 @@
   <label class="form-label me-2">Filter by level:</label>
   <select name="level" class="form-select form-select-sm d-inline-block w-auto me-2">
     <option value="">All</option>
-    <option value="INFO"  {% if level=='INFO' %}selected{% endif %}>INFO</option>
-    <option value="WARN"  {% if level=='WARN' %}selected{% endif %}>WARN</option>
+    <option value="INFO" {% if level=='INFO' %}selected{% endif %}>INFO</option>
+    <option value="WARN" {% if level=='WARN' %}selected{% endif %}>WARN</option>
     <option value="ERROR" {% if level=='ERROR' %}selected{% endif %}>ERROR</option>
   </select>
   <button class="btn btn-sm btn-secondary">Apply</button>
 </form>
 
 <div class="table-responsive">
-<table class="table table-sm table-striped">
-  <thead>
-    <tr>
-      <th>Time (UTC)</th>
-      <th>Level</th>
-      <th>User</th>
-      <th>Action</th>
-      <th>Details</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for log in logs %}
+  <table class="table table-sm table-striped">
+    <thead>
+      <tr>
+        <th>Time (UTC)</th>
+        <th>Level</th>
+        <th>User</th>
+        <th>Action</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
       <tr>
         <td>{{ log['timestamp'] }}</td>
         <td>{{ log['level'] }}</td>
@@ -33,8 +33,8 @@
         <td>{{ log['action'] }}</td>
         <td>{{ log['details'] }}</td>
       </tr>
-    {% endfor %}
-  </tbody>
-</table>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endblock %}

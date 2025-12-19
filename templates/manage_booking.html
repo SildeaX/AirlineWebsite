@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="mb-3">Manage Booking: <span class="text-primary">{{ pnr }}</span></h2>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5>{{ flight['flight_no'] }} - {{ flight['source'] }} &rarr; {{ flight['destination'] }}</h5>
+        <p class="text-muted mb-0">{{ flight['date_time'] }} | {{ flight['vehicle_type'] }}</p>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">Passengers</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Class</th>
+                        <th>Current Seat</th>
+                        <th>Change Seat</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in passengers %}
+                    <tr>
+                        <td>
+                            {{ p['name'] }}
+                            {% if p['age'] and p['age'] <= 2 %} <span class="badge bg-warning text-dark">Infant</span>
+                                {% endif %}
+                        </td>
+                        <td><span class="badge bg-secondary">{{ p['seat_type'] }}</span></td>
+                        <td>
+                            {% if p['seat_no'] %}
+                            <strong class="text-success">{{ p['seat_no'] }}</strong>
+                            {% else %}
+                            <span class="text-danger">Not Assigned</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p['age'] > 2 %}
+                            <form method="post" class="d-flex gap-2">
+                                <input type="hidden" name="passenger_id" value="{{ p['id'] }}">
+
+                                <select name="new_seat" class="form-select form-select-sm" style="width: 120px;">
+                                    <option value="" disabled selected>Select...</option>
+                                    {% for s in available_seats %}
+                                    {% if s['seat_type'] == p['seat_type'] %}
+                                    <option value="{{ s['seat_no'] }}">{{ s['seat_no'] }}</option>
+                                    {% endif %}
+                                    {% endfor %}
+                                </select>
+
+                                <button class="btn btn-sm btn-outline-primary">Move</button>
+                            </form>
+                            {% else %}
+                            <small class="text-muted">Infant (Lap)</small>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<h4 class="mt-5">Seat Map Reference</h4>
+<div class="card p-3" style="overflow-x: auto;">
+    {% include "roster.html" with context %}
+</div>
+
+{% endblock %}

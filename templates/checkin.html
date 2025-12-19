@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">Online Check-in</h4>
+            </div>
+            <div class="card-body">
+                <p>Enter your PNR code to check in and select your seats.</p>
+                <form method="post">
+                    <div class="mb-3">
+                        <label class="form-label">PNR Code</label>
+                        <input type="text" name="pnr" class="form-control form-control-lg text-uppercase"
+                            placeholder="e.g. A1B2C3" required>
+                    </div>
+                    <button class="btn btn-primary w-100 btn-lg">Check In</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

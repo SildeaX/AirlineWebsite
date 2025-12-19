@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container">
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Flight Selection: {{ flight['flight_no'] }}</h4>
+        </div>
+        <div class="card-body">
+            <p class="lead">
+                <strong>Route:</strong> {{ flight['source'] }} &rarr; {{ flight['destination'] }}<br>
+                <strong>Date:</strong> {{ flight['date_time'] }}<br>
+                <strong>Aircraft:</strong> {{ flight['vehicle_type'] }}
+            </p>
+        </div>
+    </div>
+
+    <form method="post" id="bookingForm">
+        <h3>Passenger Details</h3>
+        <div id="passenger-list">
+            <div class="card mb-3 passenger-card">
+                <div class="card-body">
+                    <h5 class="card-title">Passenger 1</h5>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" name="names[]" class="form-control" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Age</label>
+                            <input type="number" name="ages[]" class="form-control" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">SSN (Identity No)</label>
+                            <input type="text" name="ssns[]" class="form-control" placeholder="11111111111" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Class</label>
+                            <select name="seat_types[]" class="form-select">
+                                <option value="economy">Economy</option>
+                                <option value="business">Business</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex gap-2 mb-4">
+            <button type="button" class="btn btn-secondary" onclick="addPassenger()">+ Add Another Passenger</button>
+            <button type="submit" class="btn btn-success flex-grow-1">Complete Purchase</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    let passengerCount = 1;
+
+    function addPassenger() {
+        passengerCount++;
+        const template = `
+            <div class="card mb-3 passenger-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <h5 class="card-title">Passenger ${passengerCount}</h5>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.passenger-card').remove()">Remove</button>
+                    </div>
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-4">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" name="names[]" class="form-control" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Age</label>
+                            <input type="number" name="ages[]" class="form-control" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">SSN (Identity No)</label>
+                            <input type="text" name="ssns[]" class="form-control" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Class</label>
+                            <select name="seat_types[]" class="form-select">
+                                <option value="economy">Economy</option>
+                                <option value="business">Business</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('passenger-list').insertAdjacentHTML('beforeend', template);
+    }
+</script>
+
+{% endblock %}

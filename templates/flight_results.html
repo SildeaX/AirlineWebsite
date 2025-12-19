@@ -1,22 +1,25 @@
-{% extends "base.html" %}
-{% block content %}
-
 <h2>Flights</h2>
 
 <table class="table">
-<tr><th>No</th><th>Route</th><th></th></tr>
-{% for f in flights %}
-<tr>
-  <td>{{ f.flight_no }}</td>
-  <td>{{ f.source }} → {{ f.destination }}</td>
-  <td>
-    <a class="btn btn-primary btn-sm"
-       href="{{ url_for('list_saved_rosters', flight_no=f.flight_no) }}">
-       Rosters
-    </a>
-  </td>
-</tr>
-{% endfor %}
+  <tr>
+    <th>No</th>
+    <th>Route</th>
+    <th></th>
+  </tr>
+  {% for f in flights %}
+  <tr>
+    <td>{{ f.flight_no }}</td>
+    <td>{{ f.source }} &rarr; {{ f.destination }}</td>
+    <td>
+      <div class="d-flex gap-2">
+        <a class="btn btn-primary btn-sm" href="{{ url_for('list_saved_rosters', flight_no=f.flight_no) }}">
+          Rosters
+        </a>
+        <a class="btn btn-success btn-sm" href="{{ url_for('book_flight', flight_no=f.flight_no) }}">
+          Buy Ticket
+        </a>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
 </table>
-
-{% endblock %}

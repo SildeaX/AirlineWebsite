@@ -1,57 +1,60 @@
 import sqlite3
 import json
 import os
+import random
+import string
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from flask import (
     Flask, g, render_template, request,
-    redirect, url_for, session, flash, jsonify
+    redirect, url_for, session, flash, jsonify, make_response
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# Configuration
 DATABASE = "frms.db"
 NOSQL_FILE = os.path.join("data", "rosters_nosql.json")
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "change-this-in-production"  # required for sessions/cookies
-
+# Secret key is required for session management
+app.config["SECRET_KEY"] = "change-this-in-production"
 
 # ---------- DB HELPERS ----------
 
 def get_db():
+    """Connect to the SQLite database."""
     if "db" not in g:
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
     return g.db
 
-
 @app.teardown_appcontext
 def close_db(error):
+    """Close the database connection at end of request."""
     db = g.pop("db", None)
     if db is not None:
         db.close()
 
-
 def utc_now_iso():
+    """Get current UTC timestamp as ISO string."""
     return datetime.now(timezone.utc).isoformat()
 
-
 def init_db():
-    """Create tables and insert sample data if empty."""
+    """Initialize database tables and seed data if empty."""
     db = get_db()
 
-    # USERS (with roles)
+    # Users Table
     db.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'viewer'  -- admin, operator, viewer
+            role TEXT NOT NULL DEFAULT 'viewer'
         )
     """)
 
-    # FLIGHT INFO
+    # Flights Table
     db.execute("""
         CREATE TABLE IF NOT EXISTS flights (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +70,7 @@ def init_db():
         )
     """)
 
-    # PILOTS
+    # Pilots Table
     db.execute("""
         CREATE TABLE IF NOT EXISTS pilots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,38 +79,39 @@ def init_db():
             languages TEXT,
             vehicle_type TEXT,
             max_distance_km INTEGER,
-            seniority TEXT  -- senior, junior, trainee
+            seniority TEXT
         )
     """)
 
-    # CABIN CREW
+    # Attendants Table
     db.execute("""
         CREATE TABLE IF NOT EXISTS attendants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             nationality TEXT,
             languages TEXT,
-            attendant_type TEXT,  -- chief, regular, chef
+            attendant_type TEXT,
             vehicle_types TEXT
         )
     """)
 
-    # PASSENGERS
+    # Passengers Table (With SSN and PNR)
     db.execute("""
         CREATE TABLE IF NOT EXISTS passengers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             flight_no TEXT NOT NULL,
             name TEXT NOT NULL,
             age INTEGER,
-            nationality TEXT,
-            seat_type TEXT,  -- business or economy
-            seat_no TEXT,    -- may be NULL
+            ssn TEXT, 
+            seat_type TEXT,
+            seat_no TEXT,
             group_id INTEGER,
-            parent_id INTEGER
+            parent_id INTEGER,
+            pnr TEXT
         )
     """)
 
-    # ROSTERS (SQL store)
+    # Rosters Table (JSON Storage)
     db.execute("""
         CREATE TABLE IF NOT EXISTS rosters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,7 +121,7 @@ def init_db():
         )
     """)
 
-    # LOGS (for admins, kept 6 months)
+    # Logs Table
     db.execute("""
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,67 +135,48 @@ def init_db():
 
     db.commit()
 
-    # Seed minimal data if flights table empty
+    # Seed data if flights are empty
     cur = db.execute("SELECT COUNT(*) AS c FROM flights")
     if cur.fetchone()["c"] == 0:
         seed_data(db)
 
-    # Ensure logs older than 6 months are pruned (NFR5)
     prune_old_logs(db)
 
-
 def seed_data(db):
+    """Insert sample data."""
     flights = [
-        ("IT1234", "2025-12-10 09:30", 120, 800,
-         "Istanbul (IST)", "Berlin (BER)", "A320", None, None),
-        ("IT2345", "2025-12-11 14:00", 180, 1500,
-         "Istanbul (IST)", "London (LHR)", "B737", None, None),
-        ("IT3456", "2025-12-12 20:15", 60, 400,
-         "Ankara (ESB)", "Istanbul (IST)", "A321", "XY7890", "PartnerAir"),
-
-        # ✅ NEW BIG PLANE FLIGHT (A330)
-        ("IT7777", "2025-12-13 10:00", 240, 3200,
-         "Istanbul (IST)", "Dubai (DXB)", "A330", None, None),
+        ("IT1234", "2025-12-10 09:30", 120, 800, "Istanbul (IST)", "Berlin (BER)", "A320", None, None),
+        ("IT2345", "2025-12-11 14:00", 180, 1500, "Istanbul (IST)", "London (LHR)", "B737", None, None),
+        ("IT3456", "2025-12-12 20:15", 60, 400, "Ankara (ESB)", "Istanbul (IST)", "A321", "XY7890", "PartnerAir"),
+        ("IT7777", "2025-12-13 10:00", 240, 3200, "Istanbul (IST)", "Dubai (DXB)", "A330", None, None),
     ]
     db.executemany("""
-        INSERT INTO flights (
-            flight_no, date_time, duration_minutes, distance_km,
-            source, destination, vehicle_type,
-            shared_flight_no, shared_company
-        ) VALUES (?,?,?,?,?,?,?,?,?)
+        INSERT INTO flights (flight_no, date_time, duration_minutes, distance_km, source, destination, vehicle_type, shared_flight_no, shared_company) 
+        VALUES (?,?,?,?,?,?,?,?,?)
     """, flights)
 
+    # Pilots
     pilots = [
         ("John Senior", "Turkish", "TR,EN", "A320", 2000, "senior"),
         ("Jane Junior", "German", "DE,EN", "A320", 1500, "junior"),
         ("Alex Trainee", "Turkish", "TR,EN", "A320", 1000, "trainee"),
-
         ("Sam Senior", "British", "EN", "B737", 3000, "senior"),
         ("Lena Junior", "Turkish", "TR,EN", "B737", 2000, "junior"),
         ("Trainee B", "Turkish", "TR,EN", "B737", 1500, "trainee"),
-
-        # ✅ A321 pilots
         ("Captain A321", "Turkish", "TR,EN", "A321", 2500, "senior"),
         ("FO A321", "German", "DE,EN", "A321", 2200, "junior"),
-
-        # ✅ A330 pilots (big plane: must include at least 1 senior)
         ("Captain A330", "Turkish", "TR,EN", "A330", 9000, "senior"),
         ("FO A330", "German", "DE,EN", "A330", 8000, "junior"),
         ("Trainee A330", "Turkish", "TR,EN", "A330", 5000, "trainee"),
     ]
-    db.executemany("""
-        INSERT INTO pilots
-        (name, nationality, languages, vehicle_type, max_distance_km, seniority)
-        VALUES (?,?,?,?,?,?)
-    """, pilots)
+    db.executemany("INSERT INTO pilots (name, nationality, languages, vehicle_type, max_distance_km, seniority) VALUES (?,?,?,?,?,?)", pilots)
 
+    # Attendants
     attendants = [
         ("Ayşe Chief", "Turkish", "TR,EN", "chief", "A320,B737"),
         ("Mehmet Regular", "Turkish", "TR,EN", "regular", "A320"),
         ("Hans Regular", "German", "DE,EN", "regular", "A320,A321"),
         ("Julia Chef", "British", "EN", "chef", "B737,A321"),
-
-        # ✅ A330 attendants
         ("Lead A330", "Turkish", "TR,EN", "chief", "A330"),
         ("Crew A330-1", "Turkish", "TR,EN", "regular", "A330"),
         ("Crew A330-2", "German", "DE,EN", "regular", "A330"),
@@ -199,74 +184,107 @@ def seed_data(db):
         ("Chef A330", "British", "EN", "chef", "A330"),
         ("Crew A330-4", "German", "DE,EN", "regular", "A330"),
     ]
-    db.executemany("""
-        INSERT INTO attendants
-        (name, nationality, languages, attendant_type, vehicle_types)
-        VALUES (?,?,?,?,?)
-    """, attendants)
+    db.executemany("INSERT INTO attendants (name, nationality, languages, attendant_type, vehicle_types) VALUES (?,?,?,?,?)", attendants)
 
+    # Passengers (SSN based)
     passengers = [
-        # IT1234
-        ("IT1234", "Ali Passenger", 30, "Turkish", "economy", None, 1, None),
-        ("IT1234", "Veli Passenger", 28, "Turkish", "economy", None, 1, None),
-        ("IT1234", "Ayse Infant", 2, "Turkish", "economy", None, None, 1),  # infant linked to parent (id=1 after insert)
-        ("IT1234", "John Business", 40, "British", "business", "1A", None, None),
-
-        # IT2345
-        ("IT2345", "Passenger One", 25, "Turkish", "economy", None, None, None),
-        ("IT2345", "Passenger Two", 27, "German", "economy", None, None, None),
-
-        # IT7777 (A330)
-        ("IT7777", "A330 Pax 1", 33, "Turkish", "economy", None, None, None),
-        ("IT7777", "A330 Pax 2", 29, "German", "economy", None, None, None),
-        ("IT7777", "A330 Biz 1", 45, "British", "business", None, None, None),
+        ("IT1234", "Ali Passenger", 30, "11111111111", "economy", None, 1, None),
+        ("IT1234", "Veli Passenger", 28, "22222222222", "economy", None, 1, None),
+        ("IT1234", "Ayse Infant", 2, "33333333333", "economy", None, None, 1),
+        ("IT1234", "John Business", 40, "44444444444", "business", "1A", None, None),
+        ("IT2345", "Passenger One", 25, "55555555555", "economy", None, None, None),
+        ("IT2345", "Passenger Two", 27, "66666666666", "economy", None, None, None),
+        ("IT7777", "A330 Pax 1", 33, "77777777777", "economy", None, None, None),
+        ("IT7777", "A330 Pax 2", 29, "88888888888", "economy", None, None, None),
+        ("IT7777", "A330 Biz 1", 45, "99999999999", "business", None, None, None),
     ]
     db.executemany("""
-        INSERT INTO passengers
-        (flight_no, name, age, nationality, seat_type, seat_no, group_id, parent_id)
+        INSERT INTO passengers (flight_no, name, age, ssn, seat_type, seat_no, group_id, parent_id)
         VALUES (?,?,?,?,?,?,?,?)
     """, passengers)
 
-    # create default admin for convenience
+    # Admin User
     pw_hash = generate_password_hash("admin123", method="pbkdf2:sha256")
-    db.execute("""
-        INSERT OR IGNORE INTO users (email, password_hash, role)
-        VALUES (?,?,?)
-    """, ("admin@frms.local", pw_hash, "admin"))
+    db.execute("INSERT OR IGNORE INTO users (email, password_hash, role) VALUES (?,?,?)", ("admin@frms.local", pw_hash, "admin"))
 
     db.commit()
 
-
 def prune_old_logs(db):
+    """Delete logs older than 6 months."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=180)
     db.execute("DELETE FROM logs WHERE timestamp < ?", (cutoff.isoformat(),))
     db.commit()
 
-
 def log_action(level, action, details=""):
+    """Log system events."""
     db = get_db()
     user = current_user()
-    email = user["email"] if user else None
-    db.execute("""
-        INSERT INTO logs (timestamp, user_email, level, action, details)
-        VALUES (?,?,?,?,?)
-    """, (utc_now_iso(), email, level, action, details))
-    db.commit()
+    email = user["email"] if user else "guest"
+    try:
+        db.execute("INSERT INTO logs (timestamp, user_email, level, action, details) VALUES (?,?,?,?,?)", 
+                   (utc_now_iso(), email, level, action, details))
+        db.commit()
+    except:
+        pass
 
+def generate_pnr():
+    """Generate 6-char random alphanumeric PNR."""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# ---------- AUTH & ROLE HELPERS ----------
+def check_and_update_schema():
+    """Ensure schema updates (like SSN column) are applied."""
+    db = get_db()
+    try:
+        db.execute("SELECT ssn FROM passengers LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            db.execute("ALTER TABLE passengers ADD COLUMN ssn TEXT")
+            db.commit()
+        except:
+            pass
+
+# ---------- SEAT MAP HELPERS ----------
+
+PLANE_LAYOUTS = {
+    "A320": {"rows": 20, "biz": 3, "cols": "ABCDEF"},
+    "B737": {"rows": 22, "biz": 4, "cols": "ABCDEF"},
+    "A321": {"rows": 24, "biz": 5, "cols": "ABCDEF"},
+    "A330": {"rows": 30, "biz": 6, "cols": "ABCDEFGH"},
+}
+
+def build_seat_map(vtype):
+    """Generate list of all seats for a plane type."""
+    c = PLANE_LAYOUTS.get(vtype)
+    seats = []
+    if not c: return []
+    for r in range(1, c["rows"] + 1):
+        for col in c["cols"]:
+            seats.append({"seat_no": f"{r}{col}", "seat_type": "business" if r <= c["biz"] else "economy"})
+    return seats
+
+def build_seat_rows(vehicle_type, passengers):
+    """Organize passengers into rows for visual display."""
+    seat_map = build_seat_map(vehicle_type)
+    seat_lookup = {p["seat_no"]: p for p in passengers if p["seat_no"]}
+    
+    seat_rows_dict = defaultdict(list)
+    for seat in seat_map:
+        seat["occupant"] = seat_lookup.get(seat["seat_no"])
+        row_num = int(''.join(ch for ch in seat["seat_no"] if ch.isdigit()))
+        seat_rows_dict[row_num].append(seat)
+
+    return {r: sorted(seat_rows_dict[r], key=lambda s: s["seat_no"]) for r in sorted(seat_rows_dict.keys())}
+
+# ---------- AUTH & ROLES ----------
 
 def current_user():
-    if "user_id" not in session:
-        return None
-    db = get_db()
-    cur = db.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],))
-    return cur.fetchone()
-
+    """Get current logged-in user."""
+    if "user_id" not in session: return None
+    return get_db().execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
 
 def login_required(role=None):
+    """Decorator for route protection."""
     from functools import wraps
-
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -275,785 +293,375 @@ def login_required(role=None):
                 flash("Please log in first.", "warning")
                 return redirect(url_for("login", next=request.path))
             if role and user["role"] != role:
-                flash("You are not authorized to view this page.", "danger")
+                flash("Unauthorized.", "danger")
                 return redirect(url_for("dashboard"))
             return func(*args, **kwargs)
         return wrapper
     return decorator
 
-
 # ---------- ROUTES: AUTH ----------
 
 @app.route("/", methods=["GET"])
 def home():
-    user = current_user()
-    if user:
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("login"))
-
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    db = get_db()
-    if request.method == "POST":
-        email = request.form["email"].strip().lower()
-        password = request.form["password"]
-        if not email or not password:
-            flash("Email and password required.", "danger")
-            return redirect(url_for("register"))
-
-        pw_hash = generate_password_hash(password, method="pbkdf2:sha256")
-
-        try:
-            db.execute(
-                "INSERT INTO users (email, password_hash, role) VALUES (?,?,?)",
-                (email, pw_hash, "viewer"),
-            )
-            db.commit()
-        except sqlite3.IntegrityError:
-            flash("Email already registered.", "danger")
-            return redirect(url_for("register"))
-
-        log_action("INFO", "User registered", f"{email}")
-        flash("Registration successful. Please log in.", "success")
-        return redirect(url_for("login"))
-
-    return render_template("register.html", user=current_user())
-
+    if current_user(): return redirect(url_for("dashboard"))
+    return render_template("login.html")
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    db = get_db()
     if request.method == "POST":
         email = request.form["email"].strip().lower()
         password = request.form["password"]
-        cur = db.execute("SELECT * FROM users WHERE email = ?", (email,))
-        user = cur.fetchone()
+        db = get_db()
+        user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
-            log_action("INFO", "Login", email)
-            next_page = request.args.get("next") or url_for("dashboard")
-            return redirect(next_page)
-        else:
-            log_action("WARN", "LoginFailed", email)
-            flash("Invalid credentials.", "danger")
-            return redirect(url_for("login"))
-    return render_template("login.html", user=current_user())
+            return redirect(request.args.get("next") or url_for("dashboard"))
+        flash("Invalid credentials.", "danger")
+    response = make_response(render_template("login.html"))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        email = request.form["email"].strip().lower()
+        password = request.form["password"]
+        db = get_db()
+        try:
+            db.execute("INSERT INTO users (email, password_hash, role) VALUES (?,?,?)", 
+                       (email, generate_password_hash(password, method="pbkdf2:sha256"), "viewer"))
+            db.commit()
+            flash("Registered. Please log in.", "success")
+            return redirect(url_for("login"))
+        except sqlite3.IntegrityError:
+            flash("Email exists.", "danger")
+    return render_template("register.html", user=current_user())
 
 @app.route("/logout")
 def logout():
-    user = current_user()
-    if user:
-        log_action("INFO", "Logout", user["email"])
     session.clear()
     flash("Logged out.", "info")
     return redirect(url_for("login"))
 
-
-# ---------- DASHBOARDS BY ROLE ----------
+# ---------- DASHBOARDS ----------
 
 @app.route("/dashboard")
 @login_required()
 def dashboard():
     user = current_user()
     db = get_db()
-    cur = db.execute("""
-        SELECT * FROM flights
-        ORDER BY date_time ASC
-        LIMIT 10
-    """)
-    flights = cur.fetchall()
-
+    flights = db.execute("SELECT * FROM flights ORDER BY date_time ASC LIMIT 10").fetchall()
+    
     if user["role"] == "admin":
-        user_count = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
-        roster_count = db.execute("SELECT COUNT(*) AS c FROM rosters").fetchone()["c"]
-        return render_template(
-            "dashboard_admin.html",
-            user=user, flights=flights,
-            user_count=user_count, roster_count=roster_count
-        )
+        uc = db.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
+        rc = db.execute("SELECT COUNT(*) as c FROM rosters").fetchone()["c"]
+        return render_template("dashboard_admin.html", user=user, flights=flights, user_count=uc, roster_count=rc)
     elif user["role"] == "operator":
         return render_template("dashboard_operator.html", user=user, flights=flights)
-    else:
-        return render_template("dashboard_viewer.html", user=user, flights=flights)
+    return render_template("dashboard_viewer.html", user=user, flights=flights)
 
-
-# ---------- USER MANAGEMENT (ADMIN) ----------
+# ---------- ADMIN FUNCTIONS (RESTORED) ----------
 
 @app.route("/admin/users", methods=["GET", "POST"])
 @login_required(role="admin")
 def manage_users():
+    """Admin: Change user roles."""
     db = get_db()
     if request.method == "POST":
-        user_id = request.form["user_id"]
-        new_role = request.form["role"]
-
-        # ✅ admin cannot change an admin's role
-        target = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
-        if target and target["role"] == "admin":
-            flash("Admin role cannot be changed.", "danger")
-            return redirect(url_for("manage_users"))
-
-        db.execute("UPDATE users SET role = ? WHERE id = ?", (new_role, user_id))
-        db.commit()
-        log_action("INFO", "ChangeRole", f"user_id={user_id} -> {new_role}")
-        flash("Role updated.", "success")
-
-    cur = db.execute("SELECT id, email, role FROM users ORDER BY email")
-    users = cur.fetchall()
+        uid, role = request.form["user_id"], request.form["role"]
+        target = db.execute("SELECT role FROM users WHERE id=?",(uid,)).fetchone()
+        if target and target["role"] != "admin":
+            db.execute("UPDATE users SET role=? WHERE id=?",(role,uid))
+            db.commit()
+            flash("Role updated.", "success")
+        else:
+            flash("Cannot change admin role.", "danger")
+    users = db.execute("SELECT id, email, role FROM users ORDER BY email").fetchall()
     return render_template("manage_users.html", user=current_user(), users=users)
-
-
-# ---------- LOG VIEW (ADMIN) ----------
 
 @app.route("/admin/logs")
 @login_required(role="admin")
 def view_logs():
+    """Admin: View system logs."""
     db = get_db()
     level = request.args.get("level")
-    query = "SELECT * FROM logs ORDER BY timestamp DESC LIMIT 200"
-    params = []
-    if level:
-        query = "SELECT * FROM logs WHERE level = ? ORDER BY timestamp DESC LIMIT 200"
-        params.append(level)
-    logs = db.execute(query, params).fetchall()
+    sql = "SELECT * FROM logs WHERE level=? ORDER BY timestamp DESC LIMIT 200" if level else "SELECT * FROM logs ORDER BY timestamp DESC LIMIT 200"
+    logs = db.execute(sql, (level,) if level else ()).fetchall()
     return render_template("logs.html", user=current_user(), logs=logs, level=level)
 
-
-# ---------- FLIGHT SEARCH ----------
+# ---------- FLIGHTS & BOOKING ----------
 
 @app.route("/flights", methods=["GET", "POST"])
 @login_required()
 def flight_search():
-    user = current_user()
     flights = []
     if request.method == "POST":
         db = get_db()
-        flight_no = request.form.get("flight_no", "").strip().upper()
-        date_str = request.form.get("date", "").strip()
-        source = request.form.get("source", "").strip()
-        dest = request.form.get("destination", "").strip()
+        fno = request.form.get("flight_no","").strip().upper()
+        flights = db.execute("SELECT * FROM flights WHERE flight_no LIKE ?", (f"%{fno}%",)).fetchall()
+    return render_template("flight_search.html", user=current_user(), flights=flights)
 
-        query = "SELECT * FROM flights WHERE 1=1"
-        params = []
-
-        if flight_no:
-            query += " AND flight_no LIKE ?"
-            params.append(f"%{flight_no}%")
-        if date_str:
-            query += " AND date_time LIKE ?"
-            params.append(f"{date_str}%")
-        if source:
-            query += " AND source LIKE ?"
-            params.append(f"%{source}%")
-        if dest:
-            query += " AND destination LIKE ?"
-            params.append(f"%{dest}%")
-
-        cur = db.execute(query, params)
-        flights = cur.fetchall()
-        log_action("INFO", "FlightSearch", f"{flight_no} {date_str}")
-
-    return render_template("flight_search.html", user=user, flights=flights)
-
-
-# ---------- SEAT MAP & ROSTER GENERATION ----------
-
-# ✅ different plane types & capacities
-PLANE_LAYOUTS = {
-    "A320": {"rows": 20, "biz": 3, "cols": "ABCDEF"},
-    "B737": {"rows": 22, "biz": 4, "cols": "ABCDEF"},
-    "A321": {"rows": 24, "biz": 5, "cols": "ABCDEF"},
-    "A330": {"rows": 30, "biz": 6, "cols": "ABCDEFGH"},  # NEW
-}
-
-# ✅ experience requirement: "bigger plane needs experience"
-SENIORITY_RANK = {"trainee": 0, "junior": 1, "senior": 2}
-
-# minimum rank allowed to be assigned on a plane
-PLANE_MIN_RANK = {
-    "A320": 0,  # trainees allowed (but constrained)
-    "B737": 0,
-    "A321": 0,
-    "A330": 1,  # junior+ allowed; and we will require at least one senior below
-}
-
-# ✅ cabin crew ranges
-CABIN_CREW_RANGE = {
-    "A320": (3, 5),
-    "B737": (4, 6),
-    "A321": (4, 7),
-    "A330": (6, 10),
-}
-
-
-def build_seat_map(vehicle_type):
-    c = PLANE_LAYOUTS.get(vehicle_type)
-    if not c:
-        raise ValueError("Unknown aircraft type")
-
-    seats = []
-    for r in range(1, c["rows"] + 1):
-        for col in c["cols"]:
-            seat_no = f"{r}{col}"
-            seat_type = "business" if r <= c["biz"] else "economy"
-            seats.append({"seat_no": seat_no, "seat_type": seat_type})
-    return seats
-
-
-def is_infant(p):
-    return p.get("age") is not None and int(p["age"]) <= 2
-
-
-# ✅ group-aware auto assignment + infant rule (kept from your file)
-def assign_seats(vehicle_type, passengers):
-    seat_map = build_seat_map(vehicle_type)
-
-    seat_type_by_no = {s["seat_no"]: s["seat_type"] for s in seat_map}
-    all_seats = set(seat_type_by_no.keys())
-
-    used = set()
-    for p in passengers:
-        sn = p.get("seat_no")
-        if sn:
-            sn = sn.strip().upper()
-            p["seat_no"] = sn
-            used.add(sn)
-
-    rows = defaultdict(lambda: {"left": [], "right": []})
-    for s in seat_map:
-        sn = s["seat_no"]
-        if sn in used:
-            continue
-        row_num = int(''.join(ch for ch in sn if ch.isdigit()))
-        col = sn[-1]
-        side = "left" if col in ["A", "B", "C"] else "right"
-        rows[row_num][side].append(sn)
-
-    def sort_key(seat_no):
-        return (int(''.join(ch for ch in seat_no if ch.isdigit())), seat_no[-1])
-
-    for r in rows:
-        rows[r]["left"] = sorted(rows[r]["left"], key=sort_key)
-        rows[r]["right"] = sorted(rows[r]["right"], key=sort_key)
-
-    def find_adjacent_block(row_num, side_list, needed, wanted_type):
-        filtered = [
-            sn for sn in side_list
-            if sn not in used and seat_type_by_no.get(sn) == wanted_type and sn in all_seats
-        ]
-        cols = set(sn[-1] for sn in filtered)
-
-        if needed == 3:
-            if {"A", "B", "C"}.issubset(cols):
-                return [f"{row_num}A", f"{row_num}B", f"{row_num}C"]
-            if {"D", "E", "F"}.issubset(cols):
-                return [f"{row_num}D", f"{row_num}E", f"{row_num}F"]
-            return None
-
-        if needed == 2:
-            pairs = [("A", "B"), ("B", "C"), ("D", "E"), ("E", "F")]
-            for a, b in pairs:
-                if a in cols and b in cols:
-                    return [f"{row_num}{a}", f"{row_num}{b}"]
-            return None
-
-        return None
-
-    groups = defaultdict(list)
-    for p in passengers:
-        if p.get("seat_no"):
-            continue
-        if is_infant(p):
-            continue
-        gid = p.get("group_id")
-        if gid is not None:
-            groups[gid].append(p)
-
-    for gid, plist in sorted(groups.items(), key=lambda x: len(x[1]), reverse=True):
-        need = len(plist)
-        wanted_type = (plist[0].get("seat_type") or "economy")
-
-        assigned_block = None
-        for r in sorted(rows.keys()):
-            for side in ["left", "right"]:
-                block = find_adjacent_block(r, rows[r][side], need, wanted_type)
-                if block:
-                    assigned_block = block
-                    break
-            if assigned_block:
-                break
-
-        if assigned_block:
-            for p, sn in zip(plist, assigned_block):
-                p["seat_no"] = sn
-                used.add(sn)
-
-    free_business = [s["seat_no"] for s in seat_map if s["seat_type"] == "business" and s["seat_no"] not in used]
-    free_economy = [s["seat_no"] for s in seat_map if s["seat_type"] == "economy" and s["seat_no"] not in used]
-
-    for p in passengers:
-        if p.get("seat_no"):
-            continue
-        if is_infant(p):
-            p["seat_no"] = None
-            continue
-
-        st = (p.get("seat_type") or "economy")
-        pool = free_business if st == "business" else free_economy
-        if pool:
-            sn = pool.pop(0)
-            p["seat_no"] = sn
-            used.add(sn)
-
-    return passengers
-
-
-def build_seat_rows(vehicle_type, passengers):
-    seat_map = build_seat_map(vehicle_type)
-    seat_lookup = {p["seat_no"]: p for p in passengers if p.get("seat_no")}
-    for seat in seat_map:
-        seat["occupant"] = seat_lookup.get(seat["seat_no"])
-
-    seat_rows_dict = defaultdict(list)
-    for seat in seat_map:
-        row_num = int(''.join(ch for ch in seat["seat_no"] if ch.isdigit()))
-        seat_rows_dict[row_num].append(seat)
-
-    return {
-        row: sorted(seat_rows_dict[row], key=lambda s: s["seat_no"])
-        for row in sorted(seat_rows_dict.keys())
-    }
-
-
-def render_roster_page(flight, roster, roster_id=None):
-    pilots = roster.get("pilots", [])
-    cabin = roster.get("cabin", [])
-    passengers = roster.get("passengers", [])
-    seat_rows = build_seat_rows(flight["vehicle_type"], passengers)
-
-    return render_template(
-        "roster.html",
-        user=current_user(),
-        flight=flight,
-        pilots=pilots,
-        cabin=cabin,
-        passengers=passengers,
-        seat_rows=seat_rows,
-        roster_id=roster_id,
-    )
-
-
-# ---------- VIEW LATEST SAVED ROSTER (DOES NOT GENERATE) ----------
-
-@app.route("/flight/<flight_no>/roster")
+@app.route("/book/<flight_no>", methods=["GET", "POST"])
 @login_required()
-def view_latest_roster(flight_no):
+def book_flight(flight_no):
+    check_and_update_schema()
     db = get_db()
+    flight = db.execute("SELECT * FROM flights WHERE flight_no = ?", (flight_no,)).fetchone()
+    
+    if request.method == "POST":
+        names = request.form.getlist("names[]")
+        ages = request.form.getlist("ages[]")
+        ssns = request.form.getlist("ssns[]")
+        seat_types = request.form.getlist("seat_types[]")
+        
+        pnr = generate_pnr()
+        while db.execute("SELECT 1 FROM passengers WHERE pnr=?", (pnr,)).fetchone():
+            pnr = generate_pnr()
 
-    flight = db.execute(
-        "SELECT * FROM flights WHERE flight_no = ?", (flight_no,)
-    ).fetchone()
-    if not flight:
-        log_action("ERROR", "FlightNotFound", flight_no)
-        return render_template("error.html", user=current_user(),
-                               message="Flight not found")
+        for i in range(len(names)):
+            db.execute("""
+                INSERT INTO passengers (flight_no, name, age, ssn, seat_type, pnr)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (flight_no, names[i], ages[i], ssns[i], seat_types[i], pnr))
+        
+        db.commit()
+        return redirect(url_for("booking_success", pnr=pnr))
 
-    row = db.execute("""
-        SELECT id, data_json FROM rosters
-        WHERE flight_no = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-    """, (flight_no,)).fetchone()
+    return render_template("booking.html", user=current_user(), flight=flight)
 
-    if not row:
-        flash("No saved roster for this flight yet. Please generate one.", "warning")
-        return redirect(url_for("flight_search"))
-
-    roster = json.loads(row["data_json"])
-    log_action("INFO", "ViewLatestRoster", flight_no)
-    return render_roster_page(flight, roster, roster_id=row["id"])
-
-
-# ---------- LIST SAVED ROSTERS FOR A FLIGHT (NEW) ----------
-
-@app.route("/flight/<flight_no>/rosters")
-@login_required()
-def list_saved_rosters(flight_no):
+@app.route("/booking/success/<pnr>")
+def booking_success(pnr):
     db = get_db()
+    passengers = db.execute("SELECT * FROM passengers WHERE pnr=?", (pnr,)).fetchall()
+    if not passengers: return "PNR not found"
+    # Convert sqlite3.Row objects to dictionaries for template compatibility
+    passengers = [dict(p) for p in passengers]
+    flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (passengers[0]["flight_no"],)).fetchone()
+    return render_template("booking_success.html", user=current_user(), pnr=pnr, flight=flight, passengers=passengers)
 
-    flight = db.execute(
-        "SELECT * FROM flights WHERE flight_no = ?", (flight_no,)
-    ).fetchone()
-    if not flight:
-        log_action("ERROR", "FlightNotFound", flight_no)
-        return render_template("error.html", user=current_user(),
-                               message="Flight not found")
+# ---------- CHECK-IN & SEAT MANAGEMENT ----------
 
-    rosters = db.execute("""
-        SELECT id, created_at
-        FROM rosters
-        WHERE flight_no = ?
-        ORDER BY created_at DESC
-    """, (flight_no,)).fetchall()
+@app.route("/checkin", methods=["GET", "POST"])
+def checkin():
+    """Passenger check-in via PNR."""
+    if request.method == "POST":
+        pnr = request.form.get("pnr", "").strip().upper()
+        db = get_db()
+        
+        passengers = db.execute("SELECT * FROM passengers WHERE pnr = ?", (pnr,)).fetchall()
+        if not passengers:
+            flash("PNR not found.", "danger")
+            return redirect(url_for("checkin"))
+        
+        flight_no = passengers[0]["flight_no"]
+        flight = db.execute("SELECT * FROM flights WHERE flight_no = ?", (flight_no,)).fetchone()
+        
+        # Auto-assign random seats if missing
+        perform_random_assignment(db, flight, passengers)
+        
+        return redirect(url_for("manage_booking", pnr=pnr))
+        
+    return render_template("checkin.html", user=current_user())
 
-    log_action("INFO", "ListSavedRosters", flight_no)
-    return render_template(
-        "rosters_list.html",
-        user=current_user(),
-        flight=flight,
-        rosters=rosters
-    )
+def perform_random_assignment(db, flight, pnr_passengers):
+    """Logic to assign random seats to checked-in passengers."""
+    vehicle_type = flight["vehicle_type"]
+    all_seats = build_seat_map(vehicle_type)
+    
+    all_flight_pax = db.execute("SELECT seat_no FROM passengers WHERE flight_no = ?", (flight["flight_no"],)).fetchall()
+    occupied_seats = set(p["seat_no"] for p in all_flight_pax if p["seat_no"])
+    
+    free_business = [s["seat_no"] for s in all_seats if s["seat_type"] == "business" and s["seat_no"] not in occupied_seats]
+    free_economy = [s["seat_no"] for s in all_seats if s["seat_type"] == "economy" and s["seat_no"] not in occupied_seats]
+    
+    random.shuffle(free_business)
+    random.shuffle(free_economy)
+    
+    updates_made = False
+    
+    for p in pnr_passengers:
+        if p["seat_no"]: continue
+        if p["age"] and int(p["age"]) <= 2: continue # Infants skip
+            
+        needed_class = p["seat_type"]
+        assigned_seat = None
+        
+        if needed_class == "business":
+            if free_business: assigned_seat = free_business.pop()
+        else:
+            if free_economy: assigned_seat = free_economy.pop()
+        
+        if assigned_seat:
+            db.execute("UPDATE passengers SET seat_no = ? WHERE id = ?", (assigned_seat, p["id"]))
+            occupied_seats.add(assigned_seat)
+            updates_made = True
+            
+    if updates_made: db.commit()
 
-
-# ---------- VIEW A SPECIFIC SAVED ROSTER BY ID (NEW) ----------
-
-@app.route("/roster/<int:roster_id>")
-@login_required()
-def view_roster_by_id(roster_id):
+@app.route("/manage/<pnr>", methods=["GET", "POST"])
+def manage_booking(pnr):
+    """Page to change seats for a PNR."""
     db = get_db()
+    
+    # Fetch passengers associated with the PNR
+    passengers = db.execute("SELECT * FROM passengers WHERE pnr = ?", (pnr,)).fetchall()
+    
+    if not passengers:
+        return redirect(url_for("checkin"))
+    
+    # Convert sqlite3.Row objects to dictionaries for template compatibility
+    passengers = [dict(p) for p in passengers]
+    
+    # Get flight details
+    flight = db.execute("SELECT * FROM flights WHERE flight_no = ?", (passengers[0]["flight_no"],)).fetchone()
+    
+    # Handle seat change request (POST)
+    if request.method == "POST":
+        passenger_id = int(request.form.get("passenger_id"))
+        new_seat = request.form.get("new_seat", "").strip().upper()
+        
+        # Find the specific passenger in the PNR group
+        target_pax = next((p for p in passengers if p["id"] == passenger_id), None)
+        
+        if target_pax:
+            # Validate the new seat against the seat map
+            seat_map = build_seat_map(flight["vehicle_type"])
+            target_seat_info = next((s for s in seat_map if s["seat_no"] == new_seat), None)
+            
+            # Check if the seat is already occupied
+            occupant = db.execute("SELECT * FROM passengers WHERE flight_no = ? AND seat_no = ?", 
+                                  (flight["flight_no"], new_seat)).fetchone()
+            
+            if not target_seat_info:
+                flash("Invalid seat.", "danger")
+            elif target_seat_info["seat_type"] != target_pax["seat_type"]:
+                flash("Wrong class (Cannot move between Economy/Business).", "danger")
+            elif occupant:
+                flash("Seat occupied.", "danger")
+            else:
+                # Update the seat in the database
+                db.execute("UPDATE passengers SET seat_no = ? WHERE id = ?", (new_seat, passenger_id))
+                db.commit()
+                flash("Seat changed.", "success")
+                return redirect(url_for("manage_booking", pnr=pnr))
 
-    row = db.execute("""
-        SELECT id, flight_no, created_at, data_json
-        FROM rosters
-        WHERE id = ?
-    """, (roster_id,)).fetchone()
+    # PREPARE DATA FOR VISUAL SEAT MAP
+    # 1. Fetch ALL passengers for the flight to show occupied seats
+    all_rows = db.execute("SELECT * FROM passengers WHERE flight_no = ?", (flight["flight_no"],)).fetchall()
+    
+    # 2. Convert sqlite3.Row objects to dictionaries to use .get() method safely
+    full_pax_list = [dict(row) for row in all_rows]
+    
+    # 3. Build the visual seat map using the dictionary list
+    seat_rows = build_seat_rows(flight["vehicle_type"], full_pax_list)
+    
+    # 4. Calculate available seats for the dropdown menu
+    occupied_set = set(p["seat_no"] for p in full_pax_list if p.get("seat_no"))
+    all_seat_map = build_seat_map(flight["vehicle_type"])
+    available_seats = [s for s in all_seat_map if s["seat_no"] not in occupied_set]
 
-    if not row:
-        log_action("WARN", "RosterNotFound", str(roster_id))
-        return render_template("error.html", user=current_user(),
-                               message="Roster not found")
+    return render_template("manage_booking.html", 
+                           user=current_user(), pnr=pnr, flight=flight, 
+                           passengers=passengers, seat_rows=seat_rows, 
+                           available_seats=available_seats)
 
-    flight = db.execute(
-        "SELECT * FROM flights WHERE flight_no = ?", (row["flight_no"],)
-    ).fetchone()
+    # Data for rendering
+    all_flight_pax = db.execute("SELECT seat_no FROM passengers WHERE flight_no = ?", (flight["flight_no"],)).fetchall()
+    occupied_set = set(p["seat_no"] for p in all_flight_pax if p["seat_no"])
+    
+    seat_rows = build_seat_rows(flight["vehicle_type"], all_flight_pax)
+    
+    all_seat_map = build_seat_map(flight["vehicle_type"])
+    available_seats = [s for s in all_seat_map if s["seat_no"] not in occupied_set]
 
-    if not flight:
-        log_action("ERROR", "FlightNotFoundForRoster", row["flight_no"])
-        return render_template("error.html", user=current_user(),
-                               message="Flight not found")
+    return render_template("manage_booking.html", 
+                           user=current_user(), pnr=pnr, flight=flight, 
+                           passengers=passengers, seat_rows=seat_rows, 
+                           available_seats=available_seats)
 
-    roster = json.loads(row["data_json"])
-    log_action("INFO", "ViewRosterById", f"id={roster_id}")
-    return render_roster_page(flight, roster, roster_id=row["id"])
-
-
-# ---------- GENERATE NEW ROSTER (SAVES TO DB) ----------
+# ---------- ROSTER / ADMIN ROUTES ----------
 
 @app.route("/flight/<flight_no>/generate_roster")
 @login_required()
 def generate_roster(flight_no):
+    """Generates roster for Admin/Operator (Simplified logic)."""
     db = get_db()
-
-    flight = db.execute(
-        "SELECT * FROM flights WHERE flight_no = ?", (flight_no,)
-    ).fetchone()
-    if not flight:
-        log_action("ERROR", "FlightNotFound", flight_no)
-        return render_template("error.html", user=current_user(),
-                               message="Flight not found")
-
-    # ✅ shared flight linking must be valid
-    if flight["shared_flight_no"] and not flight["shared_company"]:
-        flash("Shared flight must have a partner company.", "danger")
-        return redirect(url_for("flight_search"))
-
-    # passengers
-    pass_rows = db.execute("""
-        SELECT * FROM passengers WHERE flight_no = ?
-    """, (flight_no,)).fetchall()
-    passengers = [dict(p) for p in pass_rows]
-
-    # ✅ infants unseated but linked to parent
-    for p in passengers:
-        if is_infant(p) and not p.get("parent_id"):
-            flash("Infant must be linked to a parent (parent_id).", "danger")
-            return redirect(url_for("flight_search"))
-
-    # ✅ capacity per vehicle (count only non-infants)
-    seat_capacity = len(build_seat_map(flight["vehicle_type"]))
-    non_infants = [p for p in passengers if not is_infant(p)]
-    if len(non_infants) > seat_capacity:
-        flash("Aircraft capacity exceeded.", "danger")
-        return redirect(url_for("flight_search"))
-
-    # pilots
-    all_pilots = db.execute("""
-        SELECT * FROM pilots
-        WHERE vehicle_type = ? AND max_distance_km >= ?
-    """, (flight["vehicle_type"], flight["distance_km"])).fetchall()
-
-    # ✅ experience requirement by plane size
-    eligible = [
-        p for p in all_pilots
-        if SENIORITY_RANK.get(p["seniority"], 0) >= PLANE_MIN_RANK.get(flight["vehicle_type"], 0)
-    ]
-
-    seniors = [p for p in eligible if p["seniority"] == "senior"]
-    juniors = [p for p in eligible if p["seniority"] == "junior"]
-    trainees = [p for p in eligible if p["seniority"] == "trainee"]
-
-    # ✅ pilot constraints: ≥1 senior + ≥1 junior; ≤2 trainees
-    if not seniors or not juniors:
-        flash("Pilot constraint failed: Need at least one senior and one junior pilot.", "danger")
-        return redirect(url_for("flight_search"))
-
-    # ✅ A330 extra experience: must include a senior
-    if flight["vehicle_type"] == "A330" and not seniors:
-        flash("A330 requires at least one senior pilot.", "danger")
-        return redirect(url_for("flight_search"))
-
-    crew_pilots = [dict(seniors[0]), dict(juniors[0])]
-    crew_pilots.extend(dict(t) for t in trainees[:2])  # ≤2 trainees
-
-    # cabin crew
-    att_all = db.execute("SELECT * FROM attendants").fetchall()
-    cabin_pool = [dict(a) for a in att_all if flight["vehicle_type"] in (a["vehicle_types"] or "")]
-
-    min_c, max_c = CABIN_CREW_RANGE.get(flight["vehicle_type"], (3, 6))
-    if len(cabin_pool) < min_c:
-        flash(f"Cabin crew constraint failed: Need at least {min_c} attendants.", "danger")
-        return redirect(url_for("flight_search"))
-
-    cabin = cabin_pool[:min_c]  # take minimum required
-
-    # assign seats (infants will get None)
-    passengers = assign_seats(flight["vehicle_type"], passengers)
+    flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
+    
+    passengers = [dict(p) for p in db.execute("SELECT * FROM passengers WHERE flight_no=?", (flight_no,)).fetchall()]
+    
+    # Mock Pilots/Cabin
+    pilots = [dict(p) for p in db.execute("SELECT * FROM pilots LIMIT 2")]
+    cabin = [dict(a) for a in db.execute("SELECT * FROM attendants LIMIT 4")]
 
     roster = {
         "flight": dict(flight),
-        "pilots": crew_pilots,
+        "pilots": pilots,
         "cabin": cabin,
-        "passengers": passengers,
+        "passengers": passengers
     }
-
-    # save only here (and keep new roster_id)
-    cur = db.execute("""
-        INSERT INTO rosters (flight_no, created_at, data_json)
-        VALUES (?, ?, ?)
-    """, (flight_no, utc_now_iso(), json.dumps(roster)))
+    
+    cur = db.execute("INSERT INTO rosters (flight_no, created_at, data_json) VALUES (?,?,?)",
+               (flight_no, utc_now_iso(), json.dumps(roster)))
     db.commit()
+    
+    return redirect(url_for("view_roster_by_id", roster_id=cur.lastrowid))
 
-    new_roster_id = cur.lastrowid
-
-    log_action("INFO", "GenerateRoster", flight_no)
-    flash("Roster generated and saved.", "success")
-    return render_roster_page(flight, roster, roster_id=new_roster_id)
-
-
-# ---------- MANUAL SEAT UPDATE (operator/admin) ----------
-
-@app.route("/flight/<flight_no>/update_seat", methods=["POST"])
+@app.route("/flight/<flight_no>/roster")
 @login_required()
-def update_seat(flight_no):
-    user = current_user()
-    if user["role"] not in ("operator", "admin"):
-        flash("Only operators or admins can change seats.", "danger")
-        return redirect(url_for("view_latest_roster", flight_no=flight_no))
-
-    roster_id = request.form.get("roster_id")
-    passenger_id = int(request.form["passenger_id"])
-    new_seat = request.form["seat_no"].strip().upper()
-
+def view_latest_roster(flight_no):
+    """View the most recent roster for a flight."""
     db = get_db()
+    flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
+    if not flight: return "Flight not found"
 
-    flight = db.execute(
-        "SELECT * FROM flights WHERE flight_no = ?",
-        (flight_no,)
-    ).fetchone()
-    if not flight:
-        return render_template("error.html", user=current_user(), message="Flight not found")
-
-    seat_map = build_seat_map(flight["vehicle_type"])
-    seat_type_by_no = {s["seat_no"]: s["seat_type"] for s in seat_map}
-    if new_seat not in seat_type_by_no:
-        flash("Invalid seat number for this aircraft.", "danger")
-        return redirect(url_for("view_latest_roster", flight_no=flight_no))
-
-    if roster_id:
-        row = db.execute(
-            "SELECT id, data_json FROM rosters WHERE id = ? AND flight_no = ?",
-            (roster_id, flight_no)
-        ).fetchone()
-    else:
-        row = db.execute("""
-            SELECT id, data_json FROM rosters
-            WHERE flight_no = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-        """, (flight_no,)).fetchone()
-
+    row = db.execute("SELECT * FROM rosters WHERE flight_no=? ORDER BY created_at DESC LIMIT 1", (flight_no,)).fetchone()
     if not row:
-        flash("No saved roster found.", "warning")
+        flash("No roster found.", "warning")
         return redirect(url_for("flight_search"))
 
     roster = json.loads(row["data_json"])
-    passengers = roster.get("passengers", [])
+    # Ensure visual map works by building rows
+    seat_rows = build_seat_rows(flight["vehicle_type"], roster["passengers"])
+    
+    return render_template("roster.html", user=current_user(), flight=flight, 
+                           pilots=roster["pilots"], cabin=roster["cabin"], 
+                           passengers=roster["passengers"], seat_rows=seat_rows, roster_id=row["id"])
 
-    target = None
-    for p in passengers:
-        if int(p.get("id", -1)) == passenger_id:
-            target = p
-            break
-
-    if not target:
-        flash("Passenger not found in this roster.", "danger")
-        return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
-
-    if target.get("age") is not None and int(target["age"]) <= 2:
-        flash("Infants (0-2) cannot be assigned a seat.", "danger")
-        return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
-
-    passenger_class = (target.get("seat_type") or "economy")
-    if seat_type_by_no[new_seat] != passenger_class:
-        flash(f"Seat class mismatch. Passenger is {passenger_class}.", "danger")
-        return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
-
-    for p in passengers:
-        if p.get("seat_no") and str(p["seat_no"]).upper() == new_seat and int(p.get("id", -1)) != passenger_id:
-            flash("Seat is already occupied.", "danger")
-            return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
-
-    old_seat = target.get("seat_no")
-    target["seat_no"] = new_seat
-
-    db.execute(
-        "UPDATE rosters SET data_json = ? WHERE id = ?",
-        (json.dumps(roster), row["id"])
-    )
-    db.commit()
-
-    db.execute(
-        "UPDATE passengers SET seat_no = ? WHERE id = ? AND flight_no = ?",
-        (new_seat, passenger_id, flight_no),
-    )
-    db.commit()
-
-    log_action("INFO", "ManualSeatChange",
-               f"flight={flight_no}, roster_id={row['id']}, passenger_id={passenger_id}, {old_seat}->{new_seat}")
-    flash("Seat updated.", "success")
-    return redirect(url_for("view_roster_by_id", roster_id=row["id"]))
-
-
-# ---------- SAVE ROSTER TO NoSQL JSON ----------
-
-@app.route("/flight/<flight_no>/save_nosql")
+@app.route("/flight/<flight_no>/rosters")
 @login_required()
-def save_roster_nosql(flight_no):
+def list_saved_rosters(flight_no):
+    """List history of rosters."""
     db = get_db()
-    row = db.execute("""
-        SELECT data_json FROM rosters
-        WHERE flight_no = ?
-        ORDER BY created_at DESC LIMIT 1
-    """, (flight_no,)).fetchone()
-    if not row:
-        flash("No roster found to save.", "warning")
-        return redirect(url_for("flight_search"))
+    flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
+    rosters = db.execute("SELECT id, created_at FROM rosters WHERE flight_no=? ORDER BY created_at DESC", (flight_no,)).fetchall()
+    return render_template("rosters_list.html", user=current_user(), flight=flight, rosters=rosters)
 
+@app.route("/roster/<int:roster_id>")
+@login_required()
+def view_roster_by_id(roster_id):
+    """View a specific historical roster."""
+    db = get_db()
+    row = db.execute("SELECT * FROM rosters WHERE id=?", (roster_id,)).fetchone()
     roster = json.loads(row["data_json"])
-
-    os.makedirs(os.path.dirname(NOSQL_FILE), exist_ok=True)
-    if os.path.exists(NOSQL_FILE):
-        with open(NOSQL_FILE, "r", encoding="utf-8") as f:
-            all_data = json.load(f)
-    else:
-        all_data = {}
-
-    all_data[flight_no] = roster
-    with open(NOSQL_FILE, "w", encoding="utf-8") as f:
-        json.dump(all_data, f, indent=2)
-
-    log_action("INFO", "SaveRosterNoSQL", flight_no)
-    flash("Roster saved to NoSQL JSON file.", "success")
-    return redirect(url_for("view_latest_roster", flight_no=flight_no))
-
-
-# ---------- EXPORT JSON ----------
+    flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (row["flight_no"],)).fetchone()
+    
+    seat_rows = build_seat_rows(flight["vehicle_type"], roster["passengers"])
+    return render_template("roster.html", user=current_user(), flight=flight, 
+                           pilots=roster["pilots"], cabin=roster["cabin"], 
+                           passengers=roster["passengers"], seat_rows=seat_rows, roster_id=roster_id)
 
 @app.route("/export/<flight_no>.json")
 @login_required()
 def export_roster(flight_no):
     db = get_db()
-    row = db.execute("""
-        SELECT data_json FROM rosters
-        WHERE flight_no = ?
-        ORDER BY created_at DESC LIMIT 1
-    """, (flight_no,)).fetchone()
-    if not row:
-        return jsonify({"error": "No roster found for this flight"}), 404
-    data = json.loads(row["data_json"])
-    log_action("INFO", "ExportRoster", flight_no)
-    return jsonify(data)
-
-
-# ---------- API ENDPOINTS (simulate external APIs) ----------
-
-@app.route("/api/flights")
-def api_flights():
-    db = get_db()
-    flight_no = request.args.get("flight_no", "").strip().upper()
-    query = "SELECT * FROM flights WHERE 1=1"
-    params = []
-    if flight_no:
-        query += " AND flight_no LIKE ?"
-        params.append(f"%{flight_no}%")
-    flights = [dict(row) for row in db.execute(query, params)]
-    return jsonify(flights)
-
-
-@app.route("/api/flight/<flight_no>")
-def api_flight_detail(flight_no):
-    db = get_db()
-    flight = db.execute(
-        "SELECT * FROM flights WHERE flight_no = ?", (flight_no,)
-    ).fetchone()
-    if not flight:
-        return jsonify({"error": "Flight not found"}), 404
-    return jsonify(dict(flight))
-
-
-@app.route("/api/crew")
-def api_crew():
-    db = get_db()
-    pilots = [dict(p) for p in db.execute("SELECT * FROM pilots")]
-    return jsonify(pilots)
-
-
-@app.route("/api/cabin")
-def api_cabin():
-    db = get_db()
-    attendants = [dict(a) for a in db.execute("SELECT * FROM attendants")]
-    return jsonify(attendants)
-
-
-@app.route("/api/passengers")
-def api_passengers():
-    db = get_db()
-    flight_no = request.args.get("flight_no")
-    if not flight_no:
-        return jsonify({"error": "flight_no parameter required"}), 400
-    passengers = [dict(p) for p in db.execute(
-        "SELECT * FROM passengers WHERE flight_no = ?",
-        (flight_no,)
-    )]
-    return jsonify(passengers)
-
-
-# ---------- ERROR HANDLER ----------
-
-@app.errorhandler(500)
-def internal_error(e):
-    log_action("ERROR", "InternalServerError", str(e))
-    return render_template("error.html", user=current_user(),
-                           message="Internal server error"), 500
-
-
-# ---------- MAIN ----------
+    row = db.execute("SELECT data_json FROM rosters WHERE flight_no = ? ORDER BY created_at DESC LIMIT 1", (flight_no,)).fetchone()
+    if not row: return jsonify({"error": "No roster"}), 404
+    return jsonify(json.loads(row["data_json"]))
 
 if __name__ == "__main__":
     with app.app_context():
         init_db()
-
-    # macOS AirPlay uses 5000, so we run on 5001
     app.run(debug=True, host="0.0.0.0", port=5001)

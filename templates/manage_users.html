@@ -25,21 +25,21 @@
             <input type="hidden" name="user_id" value="{{ u['id'] }}">
 
             {% if u["role"] == "admin" %}
-              <select class="form-select" name="role" disabled>
-                <option selected>admin</option>
-              </select>
-              <button type="button" class="btn btn-outline-secondary" disabled>
-                Locked
-              </button>
+            <select class="form-select" name="role" disabled>
+              <option selected>admin</option>
+            </select>
+            <button type="button" class="btn btn-outline-secondary" disabled>
+              Locked
+            </button>
             {% else %}
-              <select class="form-select" name="role" required>
-                <option value="viewer" {% if u["role"] == "viewer" %}selected{% endif %}>viewer</option>
-                <option value="operator" {% if u["role"] == "operator" %}selected{% endif %}>operator</option>
-                <option value="admin" {% if u["role"] == "admin" %}selected{% endif %}>admin</option>
-              </select>
-              <button type="submit" class="btn btn-primary">
-                Save
-              </button>
+            <select class="form-select" name="role" required>
+              <option value="viewer" {% if u["role"]=="viewer" %}selected{% endif %}>viewer</option>
+              <option value="operator" {% if u["role"]=="operator" %}selected{% endif %}>operator</option>
+              <option value="admin" {% if u["role"]=="admin" %}selected{% endif %}>admin</option>
+            </select>
+            <button type="submit" class="btn btn-primary">
+              Save
+            </button>
             {% endif %}
           </form>
         </td>
