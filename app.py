@@ -275,6 +275,44 @@ def build_seat_rows(vehicle_type, passengers):
 
     return {r: sorted(seat_rows_dict[r], key=lambda s: s["seat_no"]) for r in sorted(seat_rows_dict.keys())}
 
+def refresh_roster_snapshot(db, flight_no):
+    """
+    Called after check-in, seat change, or passenger delete.
+    Updates the LATEST existing roster snapshot with fresh data,
+    OR creates a new one if none exists.
+    """
+    # 1. Fetch Fresh Data from SQL
+    flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
+    if not flight: return
+
+    passengers = [dict(p) for p in db.execute("SELECT * FROM passengers WHERE flight_no=?", (flight_no,)).fetchall()]
+    # Mock Pilots/Cabin (same logic as generate_roster)
+    pilots = [dict(p) for p in db.execute("SELECT * FROM pilots LIMIT 2")]
+    cabin = [dict(a) for a in db.execute("SELECT * FROM attendants LIMIT 4")]
+
+    roster_data = {
+        "flight": dict(flight),
+        "pilots": pilots,
+        "cabin": cabin,
+        "passengers": passengers
+    }
+    json_str = json.dumps(roster_data)
+    timestamp = utc_now_iso()
+
+    # 2. Check for an existing latest roster
+    latest = db.execute("SELECT id FROM rosters WHERE flight_no=? ORDER BY created_at DESC LIMIT 1", (flight_no,)).fetchone()
+
+    if latest:
+        # Update the existing snapshot to reflect the change
+        db.execute("UPDATE rosters SET data_json=?, created_at=? WHERE id=?", 
+                   (json_str, timestamp, latest['id']))
+    else:
+        # No roster exists, create one automatically
+        db.execute("INSERT INTO rosters (flight_no, created_at, data_json) VALUES (?,?,?)",
+                   (flight_no, timestamp, json_str))
+    
+    db.commit()
+
 # ---------- AUTH & ROLES ----------
 
 def current_user():
@@ -461,6 +499,9 @@ def checkin():
         # Auto-assign random seats if missing
         perform_random_assignment(db, flight, passengers)
         
+        # Auto-update roster snapshot after check-in
+        refresh_roster_snapshot(db, flight_no)
+        
         return redirect(url_for("manage_booking", pnr=pnr))
         
     return render_template("checkin.html", user=current_user())
@@ -511,27 +552,30 @@ def manage_booking(pnr):
     if not passengers:
         return redirect(url_for("checkin"))
     
-    # Convert to dict
+    # Convert sqlite3.Row objects to dictionaries for template compatibility
     passengers = [dict(p) for p in passengers]
-    flight = db.execute("SELECT * FROM flights WHERE flight_no = ?", (passengers[0]["flight_no"],)).fetchone()
     
-    # --- FIX START: Fetch Mock Crew Data for Live View ---
-    # (In a real app, you would filter these by flight_id/schedule)
+    # Get flight details
+    flight = db.execute("SELECT * FROM flights WHERE flight_no = ?", (passengers[0]["flight_no"],)).fetchone()
+
+    # Fetch Pilot/Cabin data so sidebar appears in Check-in
     pilots = [dict(p) for p in db.execute("SELECT * FROM pilots LIMIT 2")]
     cabin = [dict(a) for a in db.execute("SELECT * FROM attendants LIMIT 4")]
-    # --- FIX END ---
-
+    
     # Handle seat change request (POST)
     if request.method == "POST":
         passenger_id = int(request.form.get("passenger_id"))
         new_seat = request.form.get("new_seat", "").strip().upper()
         
+        # Find the specific passenger in the PNR group
         target_pax = next((p for p in passengers if p["id"] == passenger_id), None)
         
         if target_pax:
+            # Validate the new seat against the seat map
             seat_map = build_seat_map(flight["vehicle_type"])
             target_seat_info = next((s for s in seat_map if s["seat_no"] == new_seat), None)
             
+            # Check if the seat is already occupied
             occupant = db.execute("SELECT * FROM passengers WHERE flight_no = ? AND seat_no = ?", 
                                   (flight["flight_no"], new_seat)).fetchone()
             
@@ -542,28 +586,69 @@ def manage_booking(pnr):
             elif occupant:
                 flash("Seat occupied.", "danger")
             else:
+                # Update the seat in the database
                 db.execute("UPDATE passengers SET seat_no = ? WHERE id = ?", (new_seat, passenger_id))
                 db.commit()
+                
+                # Auto-update roster snapshot after seat change
+                refresh_roster_snapshot(db, flight["flight_no"])
+
                 flash("Seat changed.", "success")
                 return redirect(url_for("manage_booking", pnr=pnr))
 
     # PREPARE DATA FOR VISUAL SEAT MAP
-    # Fetch ALL passengers for the flight to show occupied seats (Live Data)
+    # 1. Fetch ALL passengers for the flight to show occupied seats
     all_rows = db.execute("SELECT * FROM passengers WHERE flight_no = ?", (flight["flight_no"],)).fetchall()
+    
+    # 2. Convert sqlite3.Row objects to dictionaries to use .get() method safely
     full_pax_list = [dict(row) for row in all_rows]
     
+    # 3. Build the visual seat map using the dictionary list
     seat_rows = build_seat_rows(flight["vehicle_type"], full_pax_list)
     
+    # 4. Calculate available seats for the dropdown menu
     occupied_set = set(p["seat_no"] for p in full_pax_list if p.get("seat_no"))
     all_seat_map = build_seat_map(flight["vehicle_type"])
     available_seats = [s for s in all_seat_map if s["seat_no"] not in occupied_set]
 
-    # Pass 'pilots' and 'cabin' so the partial template renders correctly
+    # Pass pilots and cabin here so the included template renders the sidebar
     return render_template("manage_booking.html", 
                            user=current_user(), pnr=pnr, flight=flight, 
                            passengers=passengers, seat_rows=seat_rows, 
                            available_seats=available_seats,
-                           pilots=pilots, cabin=cabin) # Added pilots/cabin
+                           pilots=pilots, cabin=cabin)
+
+@app.route("/passenger/delete/<int:pax_id>", methods=["POST"])
+@login_required()
+def delete_passenger(pax_id):
+    """Allows admin/operator to delete a passenger from DB."""
+    user = current_user()
+    if user["role"] not in ["admin", "operator"]:
+        flash("Unauthorized", "danger")
+        return redirect(url_for("dashboard"))
+    
+    db = get_db()
+    # Retrieve details BEFORE deletion for logging
+    pax = db.execute("SELECT * FROM passengers WHERE id=?", (pax_id,)).fetchone()
+    if not pax:
+        flash("Passenger not found.", "warning")
+        return redirect(url_for("dashboard"))
+    
+    flight_no = pax["flight_no"]
+    pax_name = pax["name"] # Store name for log
+    
+    db.execute("DELETE FROM passengers WHERE id=?", (pax_id,))
+    db.commit()
+    
+    # LOGGING INFO level
+    log_action("INFO", "DeletePassenger", f"{pax_name} silindi")
+    
+    # Also update the roster snapshot since data changed
+    refresh_roster_snapshot(db, flight_no)
+    
+    flash("Passenger removed from database.", "success")
+    # Redirect back to the roster view for this flight
+    return redirect(url_for("view_latest_roster", flight_no=flight_no))
 
 # ---------- ROSTER / ADMIN ROUTES ----------
 
@@ -571,18 +656,16 @@ def manage_booking(pnr):
 @login_required()
 def generate_roster(flight_no):
     """Generates roster for Admin/Operator (Simplified logic)."""
+    # --- Check Permissions ---
     user = current_user()
-    
-    # --- FIX START: Permission Check ---
     if user["role"] not in ["admin", "operator"]:
         flash("You do not have permission to generate rosters.", "danger")
         return redirect(url_for("dashboard"))
-    # --- FIX END ---
+    # -------------------------
 
     db = get_db()
     flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
     
-    # Fetch LIVE passengers to save into the snapshot
     passengers = [dict(p) for p in db.execute("SELECT * FROM passengers WHERE flight_no=?", (flight_no,)).fetchall()]
     
     # Mock Pilots/Cabin
@@ -600,7 +683,6 @@ def generate_roster(flight_no):
                (flight_no, utc_now_iso(), json.dumps(roster)))
     db.commit()
     
-    flash("New roster snapshot generated successfully.", "success")
     return redirect(url_for("view_roster_by_id", roster_id=cur.lastrowid))
 
 @app.route("/flight/<flight_no>/roster")
@@ -611,18 +693,34 @@ def view_latest_roster(flight_no):
     flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
     if not flight: return "Flight not found"
 
+    # Previously this loaded JSON from 'rosters' table.
+    # To support 'automatic update' when a passenger is added or deleted via SQL,
+    # we must load the LIVE passengers here, overriding the snapshot data for the view.
+    
+    # Get latest snapshot just for pilot/cabin info (or mock it)
     row = db.execute("SELECT * FROM rosters WHERE flight_no=? ORDER BY created_at DESC LIMIT 1", (flight_no,)).fetchone()
-    if not row:
-        flash("No roster found.", "warning")
-        return redirect(url_for("flight_search"))
+    
+    # LIVE PASSENGERS
+    live_passengers = [dict(p) for p in db.execute("SELECT * FROM passengers WHERE flight_no=?", (flight_no,)).fetchall()]
+    
+    # Pilots/Cabin (either from snapshot or live mock)
+    if row:
+        roster_data = json.loads(row["data_json"])
+        pilots = roster_data.get("pilots", [])
+        cabin = roster_data.get("cabin", [])
+        roster_id = row["id"]
+    else:
+        # Fallback if no roster snapshot exists yet
+        pilots = [dict(p) for p in db.execute("SELECT * FROM pilots LIMIT 2")]
+        cabin = [dict(a) for a in db.execute("SELECT * FROM attendants LIMIT 4")]
+        roster_id = None
 
-    roster = json.loads(row["data_json"])
-    # Ensure visual map works by building rows
-    seat_rows = build_seat_rows(flight["vehicle_type"], roster["passengers"])
+    # Ensure visual map works by building rows with LIVE passengers
+    seat_rows = build_seat_rows(flight["vehicle_type"], live_passengers)
     
     return render_template("roster.html", user=current_user(), flight=flight, 
-                           pilots=roster["pilots"], cabin=roster["cabin"], 
-                           passengers=roster["passengers"], seat_rows=seat_rows, roster_id=row["id"])
+                           pilots=pilots, cabin=cabin, 
+                           passengers=live_passengers, seat_rows=seat_rows, roster_id=roster_id)
 
 @app.route("/flight/<flight_no>/rosters")
 @login_required()
