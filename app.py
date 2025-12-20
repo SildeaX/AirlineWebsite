@@ -15,6 +15,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # Configuration
 DATABASE = "frms.db"
 NOSQL_FILE = os.path.join("data", "rosters_nosql.json")
+INFANT_AGE = 3
 
 app = Flask(__name__)
 # Secret key is required for session management
@@ -143,69 +144,111 @@ def init_db():
     prune_old_logs(db)
 
 def seed_data(db):
-    """Insert sample data."""
+    """Insert sample data (expanded) so the system looks full."""
+    # ----------------- FLIGHTS (15) -----------------
     flights = [
-        ("IT1234", "2025-12-10 09:30", 120, 800, "Istanbul (IST)", "Berlin (BER)", "A320", None, None),
-        ("IT2345", "2025-12-11 14:00", 180, 1500, "Istanbul (IST)", "London (LHR)", "B737", None, None),
-        ("IT3456", "2025-12-12 20:15", 60, 400, "Ankara (ESB)", "Istanbul (IST)", "A321", "XY7890", "PartnerAir"),
-        ("IT7777", "2025-12-13 10:00", 240, 3200, "Istanbul (IST)", "Dubai (DXB)", "A330", None, None),
-    ]
-    db.executemany("""
-        INSERT INTO flights (flight_no, date_time, duration_minutes, distance_km, source, destination, vehicle_type, shared_flight_no, shared_company) 
-        VALUES (?,?,?,?,?,?,?,?,?)
-    """, flights)
+        ("IT1234", "2025-12-10 09:30", 120, 800,  "Istanbul (IST)", "Berlin (BER)",  "A320", None, None),
+        ("IT2345", "2025-12-11 14:00", 180, 1500, "Istanbul (IST)", "London (LHR)",  "B737", None, None),
+        ("IT3456", "2025-12-12 20:15", 60,  400,  "Ankara (ESB)",   "Istanbul (IST)","A321", "XY7890", "PartnerAir"),
+        ("IT7777", "2025-12-13 10:00", 240, 3200, "Istanbul (IST)", "Dubai (DXB)",   "A330", None, None),
 
-    # Pilots
-    pilots = [
-        ("John Senior", "Turkish", "TR,EN", "A320", 2000, "senior"),
-        ("Jane Junior", "German", "DE,EN", "A320", 1500, "junior"),
-        ("Alex Trainee", "Turkish", "TR,EN", "A320", 1000, "trainee"),
-        ("Sam Senior", "British", "EN", "B737", 3000, "senior"),
-        ("Lena Junior", "Turkish", "TR,EN", "B737", 2000, "junior"),
-        ("Trainee B", "Turkish", "TR,EN", "B737", 1500, "trainee"),
-        ("Captain A321", "Turkish", "TR,EN", "A321", 2500, "senior"),
-        ("FO A321", "German", "DE,EN", "A321", 2200, "junior"),
-        ("Captain A330", "Turkish", "TR,EN", "A330", 9000, "senior"),
-        ("FO A330", "German", "DE,EN", "A330", 8000, "junior"),
-        ("Trainee A330", "Turkish", "TR,EN", "A330", 5000, "trainee"),
-    ]
-    db.executemany("INSERT INTO pilots (name, nationality, languages, vehicle_type, max_distance_km, seniority) VALUES (?,?,?,?,?,?)", pilots)
+        ("IT1001", "2025-12-14 08:10", 95,  650,  "Izmir (ADB)",    "Istanbul (IST)","A320", None, None),
+        ("IT1002", "2025-12-14 12:45", 140, 1050, "Istanbul (IST)", "Paris (CDG)",   "A320", None, None),
+        ("IT1003", "2025-12-15 06:30", 75,  500,  "Antalya (AYT)",  "Ankara (ESB)",  "B737", None, None),
+        ("IT1004", "2025-12-15 16:20", 165, 1350, "Istanbul (IST)", "Rome (FCO)",    "B737", None, None),
+        ("IT1005", "2025-12-16 09:05", 110, 780,  "Istanbul (IST)", "Athens (ATH)",  "A321", None, None),
+        ("IT1006", "2025-12-16 18:40", 205, 1750, "Istanbul (IST)", "Madrid (MAD)",  "A321", None, None),
+        ("IT1007", "2025-12-17 01:10", 285, 3950, "Istanbul (IST)", "Doha (DOH)",    "A330", None, None),
+        ("IT1008", "2025-12-17 11:55", 300, 4200, "Istanbul (IST)", "Jeddah (JED)",  "A330", None, None),
 
-    # Attendants
-    attendants = [
-        ("Ayşe Chief", "Turkish", "TR,EN", "chief", "A320,B737"),
-        ("Mehmet Regular", "Turkish", "TR,EN", "regular", "A320"),
-        ("Hans Regular", "German", "DE,EN", "regular", "A320,A321"),
-        ("Julia Chef", "British", "EN", "chef", "B737,A321"),
-        ("Lead A330", "Turkish", "TR,EN", "chief", "A330"),
-        ("Crew A330-1", "Turkish", "TR,EN", "regular", "A330"),
-        ("Crew A330-2", "German", "DE,EN", "regular", "A330"),
-        ("Crew A330-3", "Turkish", "TR,EN", "regular", "A330"),
-        ("Chef A330", "British", "EN", "chef", "A330"),
-        ("Crew A330-4", "German", "DE,EN", "regular", "A330"),
+        ("IT1009", "2025-12-18 07:25", 130, 980,  "Istanbul (IST)", "Vienna (VIE)",  "A320", None, None),
+        ("IT1010", "2025-12-18 15:35", 90,  620,  "Ankara (ESB)",   "Izmir (ADB)",   "B737", None, None),
+        ("IT1011", "2025-12-19 19:15", 155, 1250, "Istanbul (IST)", "Amsterdam (AMS)","A321", None, None),
     ]
-    db.executemany("INSERT INTO attendants (name, nationality, languages, attendant_type, vehicle_types) VALUES (?,?,?,?,?)", attendants)
 
-    # Passengers (SSN based)
-    passengers = [
-        ("IT1234", "Ali Passenger", 30, "11111111111", "economy", None, 1, None),
-        ("IT1234", "Veli Passenger", 28, "22222222222", "economy", None, 1, None),
-        ("IT1234", "Ayse Infant", 2, "33333333333", "economy", None, None, 1),
-        ("IT1234", "John Business", 40, "44444444444", "business", "1A", None, None),
-        ("IT2345", "Passenger One", 25, "55555555555", "economy", None, None, None),
-        ("IT2345", "Passenger Two", 27, "66666666666", "economy", None, None, None),
-        ("IT7777", "A330 Pax 1", 33, "77777777777", "economy", None, None, None),
-        ("IT7777", "A330 Pax 2", 29, "88888888888", "economy", None, None, None),
-        ("IT7777", "A330 Biz 1", 45, "99999999999", "business", None, None, None),
-    ]
-    db.executemany("""
-        INSERT INTO passengers (flight_no, name, age, ssn, seat_type, seat_no, group_id, parent_id)
-        VALUES (?,?,?,?,?,?,?,?)
-    """, passengers)
+    for f in flights:
+        try:
+            db.execute("""
+                INSERT INTO flights
+                (flight_no, date_time, duration_minutes, distance_km, source, destination, vehicle_type, shared_flight_no, shared_company)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, f)
+        except sqlite3.IntegrityError:
+            # flight_no already exists -> skip
+            log_action("INFO", "InitDB", f"Flight {f[0]} already exists, skipped")
 
-    # Admin User
+    # ----------------- PILOTS (seed only if low) -----------------
+    pilot_count = db.execute("SELECT COUNT(*) AS c FROM pilots").fetchone()["c"]
+    if pilot_count < 20:
+        pilots = [
+            # A320
+            ("John Senior",     "Turkish", "TR,EN", "A320", 2500, "senior"),
+            ("Jane Junior",     "German",  "DE,EN", "A320", 1800, "junior"),
+            ("Alex Trainee",    "Turkish", "TR,EN", "A320", 1200, "trainee"),
+            ("Mert Senior",     "Turkish", "TR,EN", "A320", 2200, "senior"),
+            ("Elif Junior",     "Turkish", "TR,EN", "A320", 1600, "junior"),
+
+            # B737
+            ("Sam Senior",      "British", "EN",    "B737", 3500, "senior"),
+            ("Lena Junior",     "Turkish", "TR,EN", "B737", 2300, "junior"),
+            ("Trainee B",       "Turkish", "TR,EN", "B737", 1500, "trainee"),
+            ("Okan Senior",     "Turkish", "TR,EN", "B737", 3000, "senior"),
+            ("Seda Junior",     "Turkish", "TR,EN", "B737", 2100, "junior"),
+
+            # A321
+            ("Captain A321",    "Turkish", "TR,EN", "A321", 3000, "senior"),
+            ("FO A321",         "German",  "DE,EN", "A321", 2600, "junior"),
+            ("A321 Trainee",    "Turkish", "TR,EN", "A321", 1800, "trainee"),
+            ("Deniz Senior",    "Turkish", "TR,EN", "A321", 2800, "senior"),
+            ("Bora Junior",     "Turkish", "TR,EN", "A321", 2400, "junior"),
+
+            # A330 (long haul, higher experience)
+            ("Captain A330",    "Turkish", "TR,EN", "A330", 9500, "senior"),
+            ("FO A330",         "German",  "DE,EN", "A330", 8500, "junior"),
+            ("Trainee A330",    "Turkish", "TR,EN", "A330", 5200, "trainee"),
+            ("A330 Senior 2",   "British", "EN",    "A330", 9000, "senior"),
+            ("A330 Junior 2",   "Turkish", "TR,EN", "A330", 8000, "junior"),
+        ]
+        db.executemany("""
+            INSERT INTO pilots (name, nationality, languages, vehicle_type, max_distance_km, seniority)
+            VALUES (?,?,?,?,?,?)
+        """, pilots)
+
+    # ----------------- CABIN CREW (seed only if low) -----------------
+    att_count = db.execute("SELECT COUNT(*) AS c FROM attendants").fetchone()["c"]
+    if att_count < 18:
+        attendants = [
+            ("Ayşe Chief",      "Turkish", "TR,EN", "chief",   "A320,B737,A321"),
+            ("Mehmet Regular",  "Turkish", "TR,EN", "regular", "A320"),
+            ("Hans Regular",    "German",  "DE,EN", "regular", "A320,A321"),
+            ("Julia Chef",      "British", "EN",    "chef",    "B737,A321"),
+
+            ("Zeynep Regular",  "Turkish", "TR,EN", "regular", "A320,B737"),
+            ("Kerem Regular",   "Turkish", "TR,EN", "regular", "A321"),
+            ("Mina Regular",    "German",  "DE,EN", "regular", "A320,A321"),
+            ("Olivier Chef",    "French",  "FR,EN", "chef",    "A320,B737,A321"),
+
+            # A330 crew (more)
+            ("Lead A330",       "Turkish", "TR,EN", "chief",   "A330"),
+            ("Crew A330-1",     "Turkish", "TR,EN", "regular", "A330"),
+            ("Crew A330-2",     "German",  "DE,EN", "regular", "A330"),
+            ("Crew A330-3",     "Turkish", "TR,EN", "regular", "A330"),
+            ("Chef A330",       "British", "EN",    "chef",    "A330"),
+            ("Crew A330-4",     "German",  "DE,EN", "regular", "A330"),
+            ("Crew A330-5",     "Turkish", "TR,EN", "regular", "A330"),
+            ("Crew A330-6",     "Spanish", "ES,EN", "regular", "A330"),
+        ]
+        db.executemany("""
+            INSERT INTO attendants (name, nationality, languages, attendant_type, vehicle_types)
+            VALUES (?,?,?,?,?)
+        """, attendants)
+
+    # Admin user (keep)
     pw_hash = generate_password_hash("admin123", method="pbkdf2:sha256")
-    db.execute("INSERT OR IGNORE INTO users (email, password_hash, role) VALUES (?,?,?)", ("admin@frms.local", pw_hash, "admin"))
+    db.execute("""
+        INSERT OR IGNORE INTO users (email, password_hash, role)
+        VALUES (?,?,?)
+    """, ("admin@frms.local", pw_hash, "admin"))
 
     db.commit()
 
@@ -352,7 +395,7 @@ def build_extended_view(flight_row, pilots, cabin, passengers):
     unseated = pax_total - seated
 
     # infant rules
-    infants = [p for p in (passengers or []) if p.get("age") is not None and int(p["age"]) <= 2]
+    infants = [p for p in (passengers or []) if p.get("age") is not None and int(p["age"]) < INFANT_AGE]
     infants_with_seat = [p for p in infants if p.get("seat_no")]
     infants_without_parent = [p for p in infants if not p.get("parent_id")]
 
@@ -474,7 +517,9 @@ def login():
         user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
+            log_action("INFO", "Login", f"User {email} logged in")
             return redirect(request.args.get("next") or url_for("dashboard"))
+        log_action("WARN", "Login", f"Failed login attempt for {email}")
         flash("Invalid credentials.", "danger")
     response = make_response(render_template("login.html"))
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -495,11 +540,15 @@ def register():
             flash("Registered. Please log in.", "success")
             return redirect(url_for("login"))
         except sqlite3.IntegrityError:
+            log_action("WARN", "RegisterUser", f"Duplicate email registration attempt: {email}")
             flash("Email exists.", "danger")
     return render_template("register.html", user=current_user())
 
 @app.route("/logout")
 def logout():
+    user = current_user()
+    email = user["email"] if user else "unknown"
+    log_action("INFO", "Logout", f"User {email} logged out")
     session.clear()
     flash("Logged out.", "info")
     return redirect(url_for("login"))
@@ -575,6 +624,13 @@ def book_flight(flight_no):
         ssns = request.form.getlist("ssns[]")
         seat_types = request.form.getlist("seat_types[]")
         
+        # Validate infant rules
+        infants = sum(1 for age in ages if int(age) < INFANT_AGE)
+        adults = sum(1 for age in ages if int(age) >= 18)
+        if infants > 0 and adults == 0:
+            flash(f"Infants (under {INFANT_AGE} years) cannot travel without an adult (18+ years).", "danger")
+            return render_template("booking.html", user=current_user(), flight=flight)
+        
         pnr = generate_pnr()
         while db.execute("SELECT 1 FROM passengers WHERE pnr=?", (pnr,)).fetchone():
             pnr = generate_pnr()
@@ -586,6 +642,7 @@ def book_flight(flight_no):
             """, (flight_no, names[i], ages[i], ssns[i], seat_types[i], pnr))
         
         db.commit()
+        log_action("INFO", "BookFlight", f"PNR={pnr}")
         return redirect(url_for("booking_success", pnr=pnr))
 
     return render_template("booking.html", user=current_user(), flight=flight)
@@ -623,6 +680,7 @@ def checkin():
         # Auto-update roster snapshot after check-in
         refresh_roster_snapshot(db, flight_no)
         
+        log_action("INFO", "CheckIn", f"PNR={pnr} checked in for flight {flight_no}")
         return redirect(url_for("manage_booking", pnr=pnr))
         
     return render_template("checkin.html", user=current_user())
@@ -645,7 +703,7 @@ def perform_random_assignment(db, flight, pnr_passengers):
     
     for p in pnr_passengers:
         if p["seat_no"]: continue
-        if p["age"] and int(p["age"]) <= 2: continue # Infants skip
+        if p["age"] and int(p["age"]) < INFANT_AGE: continue # Infants skip
             
         needed_class = p["seat_type"]
         assigned_seat = None
@@ -745,6 +803,7 @@ def delete_passenger(pax_id):
     """Allows admin/operator to delete a passenger from DB."""
     user = current_user()
     if user["role"] not in ["admin", "operator"]:
+        log_action("ERROR", "DeletePassenger", f"Unauthorized access attempt by {user['email']}")
         flash("Unauthorized", "danger")
         return redirect(url_for("dashboard"))
     
@@ -752,6 +811,7 @@ def delete_passenger(pax_id):
     # Retrieve details BEFORE deletion for logging
     pax = db.execute("SELECT * FROM passengers WHERE id=?", (pax_id,)).fetchone()
     if not pax:
+        log_action("ERROR", "DeletePassenger", f"Passenger ID {pax_id} not found")
         flash("Passenger not found.", "warning")
         return redirect(url_for("dashboard"))
     
@@ -762,7 +822,7 @@ def delete_passenger(pax_id):
     db.commit()
     
     # LOGGING INFO level
-    log_action("INFO", "DeletePassenger", f"{pax_name} silindi")
+    log_action("INFO", "DeletePassenger", f"{pax_name} deleted from flight {flight_no}")
     
     # Also update the roster snapshot since data changed
     refresh_roster_snapshot(db, flight_no)
@@ -876,7 +936,9 @@ def view_roster_by_id(roster_id):
 def export_roster(flight_no):
     db = get_db()
     row = db.execute("SELECT data_json FROM rosters WHERE flight_no = ? ORDER BY created_at DESC LIMIT 1", (flight_no,)).fetchone()
-    if not row: return jsonify({"error": "No roster"}), 404
+    if not row: 
+        log_action("ERROR", "ExportRoster", f"No roster found for flight {flight_no}")
+        return jsonify({"error": "No roster"}), 404
     return jsonify(json.loads(row["data_json"]))
 
 if __name__ == "__main__":
