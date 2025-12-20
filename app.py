@@ -265,7 +265,7 @@ def build_seat_map(vtype):
 def build_seat_rows(vehicle_type, passengers):
     """Organize passengers into rows for visual display."""
     seat_map = build_seat_map(vehicle_type)
-    seat_lookup = {p["seat_no"]: p for p in passengers if p["seat_no"]}
+    seat_lookup = {p["seat_no"]: p for p in passengers if p.get("seat_no")}
     
     seat_rows_dict = defaultdict(list)
     for seat in seat_map:
@@ -312,6 +312,127 @@ def refresh_roster_snapshot(db, flight_no):
                    (flight_no, timestamp, json_str))
     
     db.commit()
+
+# ---------- ✅ EXTENDED VIEW HELPERS (ADDED) ----------
+
+CABIN_CREW_RANGES = {
+    # tweak these if your report specifies exact ranges
+    "A320": (3, 6),
+    "B737": (3, 6),
+    "A321": (3, 7),
+    "A330": (5, 10),
+}
+
+def build_extended_view(flight_row, pilots, cabin, passengers):
+    """
+    Builds 'Extended View' data:
+    - constraint checks
+    - capacity usage
+    - infant/parent linking
+    - shared flight details
+    """
+    flight = dict(flight_row) if flight_row else {}
+    vtype = flight.get("vehicle_type")
+
+    layout = PLANE_LAYOUTS.get(vtype)
+    total_seats = 0
+    business_seats = 0
+    economy_seats = 0
+    if layout:
+        cols_count = len(layout["cols"])
+        total_seats = layout["rows"] * cols_count
+        business_seats = layout["biz"] * cols_count
+        economy_seats = total_seats - business_seats
+
+    # passengers counts
+    pax_total = len(passengers or [])
+    pax_business = sum(1 for p in (passengers or []) if (p.get("seat_type") or "").lower() == "business")
+    pax_economy = sum(1 for p in (passengers or []) if (p.get("seat_type") or "").lower() != "business")
+    seated = sum(1 for p in (passengers or []) if p.get("seat_no"))
+    unseated = pax_total - seated
+
+    # infant rules
+    infants = [p for p in (passengers or []) if p.get("age") is not None and int(p["age"]) <= 2]
+    infants_with_seat = [p for p in infants if p.get("seat_no")]
+    infants_without_parent = [p for p in infants if not p.get("parent_id")]
+
+    # pilot constraints
+    seniors = [p for p in (pilots or []) if (p.get("seniority") or "").lower() == "senior"]
+    juniors = [p for p in (pilots or []) if (p.get("seniority") or "").lower() == "junior"]
+    trainees = [p for p in (pilots or []) if (p.get("seniority") or "").lower() == "trainee"]
+
+    # distance/experience check (if max_distance_km is present)
+    dist = flight.get("distance_km")
+    pilot_distance_issues = []
+    if dist is not None:
+        try:
+            dist_int = int(dist)
+            for p in (pilots or []):
+                md = p.get("max_distance_km")
+                if md is not None and int(md) < dist_int:
+                    pilot_distance_issues.append(p)
+        except:
+            pass
+
+    # cabin crew range check
+    cmin, cmax = CABIN_CREW_RANGES.get(vtype, (0, 999))
+    cabin_ok = (len(cabin or []) >= cmin and len(cabin or []) <= cmax)
+
+    # shared flight linking
+    shared_ok = True
+    if flight.get("shared_flight_no") or flight.get("shared_company"):
+        shared_ok = bool(flight.get("shared_flight_no")) and bool(flight.get("shared_company"))
+
+    checks = {
+        "pilot_senior_present": len(seniors) >= 1,
+        "pilot_junior_present": len(juniors) >= 1,
+        "pilot_trainee_max_2": len(trainees) <= 2,
+        "pilot_distance_ok": len(pilot_distance_issues) == 0,
+        "cabin_count_ok": cabin_ok,
+        "infants_have_no_seat": len(infants_with_seat) == 0,
+        "infants_linked_to_parent": len(infants_without_parent) == 0,
+        "capacity_total_ok": pax_total <= total_seats if total_seats else True,
+        "capacity_business_ok": pax_business <= business_seats if business_seats else True,
+        "capacity_economy_ok": pax_economy <= economy_seats if economy_seats else True,
+        "shared_link_valid": shared_ok,
+    }
+
+    overall_ok = all(checks.values())
+
+    return {
+        "overall_ok": overall_ok,
+        "checks": checks,
+        "capacity": {
+            "vehicle_type": vtype,
+            "total_seats": total_seats,
+            "business_seats": business_seats,
+            "economy_seats": economy_seats,
+            "pax_total": pax_total,
+            "pax_business": pax_business,
+            "pax_economy": pax_economy,
+            "seated": seated,
+            "unseated": unseated,
+        },
+        "shared": {
+            "shared_flight_no": flight.get("shared_flight_no"),
+            "shared_company": flight.get("shared_company"),
+            "shared_ok": shared_ok,
+        },
+        "crew": {
+            "seniors": seniors,
+            "juniors": juniors,
+            "trainees": trainees,
+            "pilot_distance_issues": pilot_distance_issues,
+            "cabin_count": len(cabin or []),
+            "cabin_min": cmin,
+            "cabin_max": cmax,
+        },
+        "infants": {
+            "count": len(infants),
+            "with_seat": infants_with_seat,
+            "without_parent": infants_without_parent,
+        }
+    }
 
 # ---------- AUTH & ROLES ----------
 
@@ -693,10 +814,6 @@ def view_latest_roster(flight_no):
     flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (flight_no,)).fetchone()
     if not flight: return "Flight not found"
 
-    # Previously this loaded JSON from 'rosters' table.
-    # To support 'automatic update' when a passenger is added or deleted via SQL,
-    # we must load the LIVE passengers here, overriding the snapshot data for the view.
-    
     # Get latest snapshot just for pilot/cabin info (or mock it)
     row = db.execute("SELECT * FROM rosters WHERE flight_no=? ORDER BY created_at DESC LIMIT 1", (flight_no,)).fetchone()
     
@@ -717,10 +834,14 @@ def view_latest_roster(flight_no):
 
     # Ensure visual map works by building rows with LIVE passengers
     seat_rows = build_seat_rows(flight["vehicle_type"], live_passengers)
+
+    # ✅ Extended View data (ADDED)
+    extended = build_extended_view(flight, pilots, cabin, live_passengers)
     
     return render_template("roster.html", user=current_user(), flight=flight, 
                            pilots=pilots, cabin=cabin, 
-                           passengers=live_passengers, seat_rows=seat_rows, roster_id=roster_id)
+                           passengers=live_passengers, seat_rows=seat_rows, roster_id=roster_id,
+                           extended=extended)
 
 @app.route("/flight/<flight_no>/rosters")
 @login_required()
@@ -741,9 +862,14 @@ def view_roster_by_id(roster_id):
     flight = db.execute("SELECT * FROM flights WHERE flight_no=?", (row["flight_no"],)).fetchone()
     
     seat_rows = build_seat_rows(flight["vehicle_type"], roster["passengers"])
+
+    # ✅ Extended View data (ADDED)
+    extended = build_extended_view(flight, roster.get("pilots", []), roster.get("cabin", []), roster.get("passengers", []))
+
     return render_template("roster.html", user=current_user(), flight=flight, 
                            pilots=roster["pilots"], cabin=roster["cabin"], 
-                           passengers=roster["passengers"], seat_rows=seat_rows, roster_id=roster_id)
+                           passengers=roster["passengers"], seat_rows=seat_rows, roster_id=roster_id,
+                           extended=extended)
 
 @app.route("/export/<flight_no>.json")
 @login_required()

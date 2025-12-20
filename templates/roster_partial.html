@@ -31,7 +31,7 @@
         display: block;
     }
 
-    /* Plane + Tabular side-by-side */
+    /* Plane + Views side-by-side */
     .views-grid {
         display: grid;
         grid-template-columns: auto minmax(320px, 1fr);
@@ -138,17 +138,9 @@
         line-height: 1;
     }
 
-    .seat.business {
-        background: rgba(37, 99, 235, 0.08);
-    }
-
-    .seat.economy {
-        background: rgba(16, 185, 129, 0.07);
-    }
-
-    .seat.occupied {
-        outline: 3px solid rgba(239, 68, 68, 0.35);
-    }
+    .seat.business { background: rgba(37, 99, 235, 0.08); }
+    .seat.economy { background: rgba(16, 185, 129, 0.07); }
+    .seat.occupied { outline: 3px solid rgba(239, 68, 68, 0.35); }
 
     .seat small {
         position: absolute;
@@ -191,6 +183,26 @@
         font-weight: 700;
         font-size: 12px;
     }
+
+    /* -------- Extended view card -------- */
+    .ext-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        background: #fff;
+        padding: 14px;
+        margin-top: 14px;
+    }
+
+    .ext-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 0 0 10px;
+        font-weight: 800;
+    }
+
+    .check-ok { color: #16a34a; font-weight: 800; }
+    .check-bad { color: #dc2626; font-weight: 800; }
 
     @media (max-width: 1200px) {
         .views-grid {
@@ -246,6 +258,8 @@
 
     <div class="right-col">
         <div class="views-grid">
+
+            <!-- Plane View (everyone can see seats; names only admin/operator) -->
             <div class="plane-body">
                 <h3 class="plane-title">Plane View</h3>
                 <p class="plane-sub">
@@ -265,6 +279,7 @@
                     <div class="seat-row">
                         <div class="row-num">{{ row_num }}</div>
                         <div class="row-seats">
+
                             {% if flight['vehicle_type'] == 'A330' %}
                             <div class="seat-block">
                                 {% for col in ['A','B','C'] %}
@@ -279,7 +294,9 @@
                                 {% endif %}
                                 {% endfor %}
                             </div>
+
                             <div class="aisle-label">aisle</div>
+
                             <div class="seat-block">
                                 {% for col in ['D','E'] %}
                                 {% set s = seat_by_col.get(col) %}
@@ -293,7 +310,9 @@
                                 {% endif %}
                                 {% endfor %}
                             </div>
+
                             <div class="aisle-label">aisle</div>
+
                             <div class="seat-block">
                                 {% for col in ['F','G','H'] %}
                                 {% set s = seat_by_col.get(col) %}
@@ -307,6 +326,7 @@
                                 {% endif %}
                                 {% endfor %}
                             </div>
+
                             {% else %}
                             <div class="seat-block">
                                 {% for col in ['A','B','C'] %}
@@ -321,7 +341,9 @@
                                 {% endif %}
                                 {% endfor %}
                             </div>
+
                             <div class="aisle-label">aisle</div>
+
                             <div class="seat-block">
                                 {% for col in ['D','E','F'] %}
                                 {% set s = seat_by_col.get(col) %}
@@ -336,82 +358,194 @@
                                 {% endfor %}
                             </div>
                             {% endif %}
+
                         </div>
                     </div>
                     {% endfor %}
                 </div>
             </div>
 
-            {% if user and user['role'] in ['admin','operator'] and pilots %}
-            <div class="tab-card">
-                <h4>Tabular View</h4>
-                <div class="tab-help">
-                    List of all people in this roster (crew + passengers). Visible only to Operator/Admin.
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-sm table-striped align-middle">
-                        <thead>
-                            <tr>
-                                <th>Type</th>
-                                <th>Name</th>
-                                <th>Role / Seat type</th>
-                                <th>Seat No</th>
-                                {% if user and user['role'] in ['admin', 'operator'] %}
-                                <th>Action</th>
-                                {% endif %}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for p in pilots %}
-                            <tr>
-                                <td>Pilot</td>
-                                <td>{{ p['name'] }}</td>
-                                <td><span class="pill">{{ p['seniority'] }}</span></td>
-                                <td>-</td>
-                                {% if user and user['role'] in ['admin', 'operator'] %}
-                                <td>-</td>
-                                {% endif %}
-                            </tr>
-                            {% endfor %}
-                            {% for c in cabin %}
-                            <tr>
-                                <td>Cabin</td>
-                                <td>{{ c['name'] }}</td>
-                                <td><span class="pill">{{ c.get('attendant_type','crew') }}</span></td>
-                                <td>-</td>
-                                {% if user and user['role'] in ['admin', 'operator'] %}
-                                <td>-</td>
-                                {% endif %}
-                            </tr>
-                            {% endfor %}
-                            {% for pax in passengers %}
-                            <tr>
-                                <td>Passenger</td>
-                                <td>{{ pax['name'] }}</td>
-                                <td>
-                                    <span class="pill">{{ pax.get('seat_type','economy') }}</span>
-                                    {% if pax.get('age') is not none and pax['age']|int <= 2 %} <span class="pill">
-                                        infant</span>
+            <!-- Right side stack: Tabular + Extended -->
+            <div>
+
+                <!-- Tabular View (admin/operator only) -->
+                {% if user and user['role'] in ['admin','operator'] %}
+                <div class="tab-card">
+                    <h4>Tabular View</h4>
+                    <div class="tab-help">
+                        List of all people in this roster (crew + passengers). Visible only to Operator/Admin.
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Name</th>
+                                    <th>Role / Seat type</th>
+                                    <th>Seat No</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for p in pilots %}
+                                <tr>
+                                    <td>Pilot</td>
+                                    <td>{{ p['name'] }}</td>
+                                    <td><span class="pill">{{ p['seniority'] }}</span></td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                </tr>
+                                {% endfor %}
+
+                                {% for c in cabin %}
+                                <tr>
+                                    <td>Cabin</td>
+                                    <td>{{ c['name'] }}</td>
+                                    <td><span class="pill">{{ c.get('attendant_type','crew') }}</span></td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                </tr>
+                                {% endfor %}
+
+                                {% for pax in passengers %}
+                                <tr>
+                                    <td>Passenger</td>
+                                    <td>{{ pax['name'] }}</td>
+                                    <td>
+                                        <span class="pill">{{ pax.get('seat_type','economy') }}</span>
+                                        {% if pax.get('age') is not none and pax['age']|int <= 2 %}
+                                        <span class="pill">infant</span>
                                         {% endif %}
-                                </td>
-                                <td>
-                                    {% if pax.get('seat_no') %}{{ pax['seat_no'] }}{% else %}-{% endif %}
-                                </td>
-                                {% if user and user['role'] in ['admin', 'operator'] %}
-                                <td>
-                                    <form method="post" action="{{ url_for('delete_passenger', pax_id=pax['id']) }}"
-                                        onsubmit="return confirm('Are you sure you want to delete this passenger?');">
-                                        <button class="btn btn-sm btn-danger py-0">Delete</button>
-                                    </form>
-                                </td>
-                                {% endif %}
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                                    </td>
+                                    <td>{% if pax.get('seat_no') %}{{ pax['seat_no'] }}{% else %}-{% endif %}</td>
+                                    <td>
+                                        <form method="post" action="{{ url_for('delete_passenger', pax_id=pax['id']) }}"
+                                            onsubmit="return confirm('Are you sure you want to delete this passenger?');">
+                                            <button class="btn btn-sm btn-danger py-0">Delete</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
+                {% endif %}
+
+                <!-- ✅ Extended View (everyone can see summary; admin/operator see full details) -->
+                <div class="ext-card">
+                    <div class="ext-title">
+                        <span>Extended View</span>
+                        {% if extended and extended['overall_ok'] %}
+                            <span class="check-ok">VALID</span>
+                        {% else %}
+                            <span class="check-bad">CHECK</span>
+                        {% endif %}
+                    </div>
+
+                    {% if extended %}
+                        <div class="mb-3">
+                            <div class="fw-bold mb-1">Capacity</div>
+                            <div class="text-muted small">
+                                Total seats: {{ extended['capacity']['total_seats'] }},
+                                Business: {{ extended['capacity']['business_seats'] }},
+                                Economy: {{ extended['capacity']['economy_seats'] }}
+                            </div>
+                            <div class="text-muted small">
+                                Passengers: {{ extended['capacity']['pax_total'] }}
+                                (Biz {{ extended['capacity']['pax_business'] }}, Eco {{ extended['capacity']['pax_economy'] }}) —
+                                Seated {{ extended['capacity']['seated'] }}, Unseated {{ extended['capacity']['unseated'] }}
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="fw-bold mb-1">Constraint checks</div>
+                            <ul class="mb-0">
+                                <li>
+                                    Senior pilot present:
+                                    {% if extended['checks']['pilot_senior_present'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                                <li>
+                                    Junior pilot present:
+                                    {% if extended['checks']['pilot_junior_present'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                                <li>
+                                    Trainees ≤ 2:
+                                    {% if extended['checks']['pilot_trainee_max_2'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                                <li>
+                                    Pilot distance eligibility:
+                                    {% if extended['checks']['pilot_distance_ok'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                                <li>
+                                    Cabin crew range ({{ extended['crew']['cabin_min'] }}–{{ extended['crew']['cabin_max'] }}):
+                                    {% if extended['checks']['cabin_count_ok'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                                <li>
+                                    Infants have no seat:
+                                    {% if extended['checks']['infants_have_no_seat'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                                <li>
+                                    Infants linked to parent:
+                                    {% if extended['checks']['infants_linked_to_parent'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                                <li>
+                                    Shared flight link valid:
+                                    {% if extended['checks']['shared_link_valid'] %}<span class="check-ok">OK</span>{% else %}<span class="check-bad">FAIL</span>{% endif %}
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="mb-2">
+                            <div class="fw-bold mb-1">Shared flight</div>
+                            {% if extended['shared']['shared_flight_no'] or extended['shared']['shared_company'] %}
+                                <div class="text-muted small">
+                                    Shared flight no: {{ extended['shared']['shared_flight_no'] or '-' }},
+                                    Company: {{ extended['shared']['shared_company'] or '-' }}
+                                </div>
+                            {% else %}
+                                <div class="text-muted small">No shared flight information.</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Admin/operator: show details lists -->
+                        {% if user and user['role'] in ['admin','operator'] %}
+                            {% if extended['crew']['pilot_distance_issues'] %}
+                                <hr>
+                                <div class="fw-bold mb-1">Pilot distance issues</div>
+                                <ul class="mb-0">
+                                    {% for p in extended['crew']['pilot_distance_issues'] %}
+                                        <li>{{ p['name'] }} (max {{ p.get('max_distance_km','?') }} km)</li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+
+                            {% if extended['infants']['with_seat'] or extended['infants']['without_parent'] %}
+                                <hr>
+                                <div class="fw-bold mb-1">Infant issues</div>
+                                <ul class="mb-0">
+                                    {% for p in extended['infants']['with_seat'] %}
+                                        <li>{{ p['name'] }} has a seat assigned (should be unseated)</li>
+                                    {% endfor %}
+                                    {% for p in extended['infants']['without_parent'] %}
+                                        <li>{{ p['name'] }} has no parent_id link</li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+                        {% else %}
+                            <!-- Viewer: do not show names, only summary -->
+                            <hr>
+                            <div class="text-muted small">
+                                Detailed issue lists are visible only to Operator/Admin.
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <div class="text-muted">Extended data not available.</div>
+                    {% endif %}
+                </div>
+
             </div>
-            {% endif %}
+
         </div>
     </div>
 </div>
